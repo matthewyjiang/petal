@@ -104,6 +104,4 @@ uv run --with pytest pytest -q
 
 Unit tests use fake subprocess runners and do not require network, real ROS, apt, rosdep, uv, or colcon.
 
-## Release
 
-Publishing runs from GitHub Actions when a `v*` tag is pushed. PyPI should be configured for trusted publishing with project `petal-ros`, owner `matthewyjiang`, repository `petal`, workflow `publish.yml`, and environment `pypi`.
