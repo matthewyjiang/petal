@@ -2,33 +2,25 @@
 
 Workspace-scoped Python dependency manager for ROS2.
 
-Petal fills the gap between hand-managed `requirements.txt` files and full containerization. It discovers Python dependencies from a ROS2 workspace, resolves them apt-first, falls back to pip when needed, installs pip packages into a workspace venv, and records the result in `petal.lock`.
+Petal discovers Python dependencies in a ROS2 workspace, resolves apt-first, falls back to PyPI when needed, installs pip packages into `.petal/venv`, and writes `petal.lock`.
 
-Petal is dependency management, not node isolation. ROS2 still runs in one shared Python interpreter view.
+Petal is dependency management, not node isolation. ROS2 still runs in one shared Python interpreter view, so petal venvs are created with `--system-site-packages`.
 
-## Why
-
-- Prefer ROS/apt packages when available, avoiding accidental pip shadowing of ROS-linked packages.
-- Keep pip fallback packages scoped to the workspace under `.petal/venv`.
-- Generate a lock file so CI and teammates can detect drift.
-- Integrate with colcon via `colcon deps`.
-
-## ROS Runtime Contract
-
-ROS Python packages such as `rclpy`, `launch`, and `tf2_ros` are provided by `/opt/ros/<distro>` and the system Python path. A normal venv hides those packages, so petal always creates its managed venv with `--system-site-packages` and with the exact Python minor version used by the ROS distro.
-
-Activation order matters. Source ROS first, then the petal venv:
+## Install
 
 ```bash
-source .petal/activate
+python3 -m pip install git+https://github.com/matthewyjiang/petal.git
 ```
 
-The generated helper does both steps:
+Local development:
 
 ```bash
-source /opt/ros/<distro>/setup.bash
-source .petal/venv/bin/activate
+git clone https://github.com/matthewyjiang/petal.git
+cd petal
+python3 -m pip install -e .
 ```
+
+Requires Python 3.10+, ROS2 under `/opt/ros/<distro>`, `rosdep`, apt tools, and preferably `uv`.
 
 ## Quickstart
 
@@ -37,51 +29,50 @@ From a ROS2 workspace root:
 ```bash
 petal init
 petal add numpy
-petal sync --dry-run
 petal sync
 petal status
+source .petal/activate
 ```
 
-`petal init` writes `petal.toml`, creates `.petal/venv`, and writes `.petal/activate`.
+## Examples
 
-## Install
-
-Prerequisites:
-
-- Python 3.10+
-- ROS2 installed under `/opt/ros/<distro>`
-- `rosdep`, `apt-cache`, and `dpkg-query` available for full resolution
-- `uv` recommended; petal falls back to pip for installs when needed
-
-Install from GitHub:
+Apt-resolved package:
 
 ```bash
-python3 -m pip install git+https://github.com/matthewyjiang/petal.git
+petal add numpy
 ```
 
-Install for local development:
+PyPI package:
 
 ```bash
-git clone https://github.com/matthewyjiang/petal.git
-cd petal
-python3 -m pip install -e .
+petal add rich --pip
 ```
 
-If your system Python does not have pip installed, use `uv`:
+Colcon wrapper:
 
 ```bash
-uv tool install git+https://github.com/matthewyjiang/petal.git
+colcon deps sync
 ```
 
-Verify the CLI is available:
+## Commands
 
 ```bash
-petal --help
+petal init              # create petal.toml and .petal/venv
+petal add <name> [spec] # add dependency and sync it
+petal remove <name>     # remove dependency from manifest and venv
+petal sync              # resolve, install, write petal.lock
+petal sync --yes        # skip install prompt
+petal sync --no         # show plan, install nothing
+petal sync --dry-run    # show commands, install nothing
+petal sync --frozen     # enforce petal.lock
+petal status            # report drift; exits 2 on drift/missing/change
+petal activate          # print shell snippet for ROS + venv activation
+petal clean             # remove .petal/venv
 ```
+
+`petal sync` and `petal add` print the resolved source for each dependency before installing. If `petal add` is declined, cancelled, or run with `--dry-run`, `petal.toml` stays unchanged.
 
 ## Manifest
-
-`petal.toml` is the human-edited source of truth:
 
 ```toml
 [workspace]
@@ -90,76 +81,19 @@ python_version = "3.10"
 
 [deps]
 numpy = ">=1.24"
-torch = { pip = ">=2.1" }
+rich = { pip = ">=13" }
 some-system-lib = { apt = "libfoo-dev" }
 
 [overrides]
 ml_collections = { pip = "ml-collections" }
 ```
 
-## Commands
-
-```bash
-petal init              # detect ROS distro/Python, create manifest and venv
-petal add <name> [spec] # add a dependency to petal.toml and sync it
-petal remove <name>     # remove a dependency from petal.toml and venv
-petal sync              # discover, resolve, install, write petal.lock
-petal sync --yes        # install without prompting
-petal sync --no         # print resolved plan and do not install
-petal sync --dry-run    # print apt/pip commands without installing
-petal sync --frozen     # enforce petal.lock
-petal status            # report drift; exits 2 when drift/missing/changed
-petal activate          # print shell snippet to source ROS and venv
-petal clean             # remove .petal/venv
-```
-
-Examples:
-
-```bash
-petal add numpy
-petal add rich
-petal add scipy
-petal add numpy ">=1.24"
-petal add rich ">=13" --pip
-petal add rich --yes
-petal add opencv python3-opencv --apt
-petal remove rich
-```
-
-`petal sync` and `petal add` print the resolved source for each dependency before installing. They prompt before mutating apt or pip unless `--yes` is passed. Install commands stream native apt/uv/pip output, so download progress remains visible. Pressing `Ctrl-C` exits cleanly; if apt was interrupted, run `sudo dpkg --configure -a` if apt asks you to repair dpkg state.
-
-`petal add` preserves other manifest sections such as `[overrides]`. `petal remove` drops the manifest entry and uninstalls pip packages from `.petal/venv`; it does not run `apt remove` for system packages.
-
-Colcon wrapper:
-
-```bash
-colcon deps sync
-colcon deps status
-```
-
-## Resolution Order
-
-For each dependency, petal resolves in this order unless the manifest forces a source:
-
-1. ROS/system distro-provided Python modules, such as `rclpy`.
-2. `rosdep resolve` mappings.
-3. Apt package probe, usually `python3-<name>`.
-4. Pip/uv fallback into `.petal/venv`.
-
-Planner conflict checks run before any apt or pip mutation.
+Resolution order: ROS/system modules, `rosdep`, apt (`python3-<name>`), then PyPI.
 
 ## Development
-
-Run tests with `uv` because system Python may not have `pytest`:
 
 ```bash
 uv run --with pytest pytest -q
 ```
 
-Focused test example:
-
-```bash
-uv run --with pytest pytest -q tests/test_resolve.py
-```
-
-Unit tests use fake subprocess runners and fixtures; they do not require network, real ROS, apt, rosdep, uv, or colcon.
+Unit tests use fake subprocess runners and do not require network, real ROS, apt, rosdep, uv, or colcon.

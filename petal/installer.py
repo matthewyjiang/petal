@@ -33,7 +33,7 @@ def execute(
     install_runner: StreamRunner = default_stream_runner,
     assume_yes: bool = False,
     assume_no: bool = False,
-) -> None:
+) -> bool:
     if frozen:
         if not workspace_root:
             raise InstallerError("frozen install requires workspace root")
@@ -53,7 +53,7 @@ def execute(
 
     if dry_run:
         _print_dry_run(apt_pkgs, pip_reqs, venv)
-        return
+        return False
 
     if distro_names:
         print("DISTRO: already provided " + ", ".join(distro_names))
@@ -62,7 +62,7 @@ def execute(
     will_install = bool(missing_apt or pip_reqs)
     if will_install and not _confirm_install(assume_yes=assume_yes, assume_no=assume_no):
         print("petal: install cancelled")
-        return
+        return False
 
     if missing_apt:
         print("APT: installing " + ", ".join(missing_apt))
@@ -93,6 +93,8 @@ def execute(
     if workspace_root and manifest_path:
         write_lock(workspace_root / "petal.lock", manifest_path, [*plan.distro, *plan.apt, *plan.pip])
         print(f"lock: wrote {workspace_root / 'petal.lock'}")
+
+    return True
 
 
 def write_lock(lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]) -> None:

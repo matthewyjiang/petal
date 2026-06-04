@@ -23,7 +23,7 @@
 ## Verification
 
 - Last passing command: `uv run --with pytest pytest -q`
-- Result: `73 passed`
+- Result: `75 passed`
 
 ## Milestone Tracker
 

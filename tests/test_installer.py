@@ -24,7 +24,7 @@ def pip_dep(name: str = "rich") -> ResolvedDep:
 
 def test_execute_dry_run_prints_commands(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     plan = Plan(apt=[apt_dep()], pip=[pip_dep()])
-    execute(plan, tmp_path / "venv", dry_run=True)
+    assert execute(plan, tmp_path / "venv", dry_run=True) is False
 
     out = capsys.readouterr().out
     assert "sudo apt-get install -y python3-numpy" in out
@@ -43,7 +43,7 @@ def test_execute_installs_missing_apt_and_pip_then_writes_lock(tmp_path: Path, c
             return completed(cmd, returncode=1)
         return completed(cmd)
 
-    execute(
+    assert execute(
         Plan(apt=[apt_dep()], pip=[pip_dep()]),
         tmp_path / "venv",
         workspace_root=tmp_path,
@@ -51,7 +51,7 @@ def test_execute_installs_missing_apt_and_pip_then_writes_lock(tmp_path: Path, c
         runner=runner,
         install_runner=runner,
         assume_yes=True,
-    )
+    ) is True
 
     assert ["sudo", "apt-get", "install", "-y", "python3-numpy"] in calls
     assert ["uv", "pip", "install", "--python", str(tmp_path / "venv" / "bin" / "python"), "rich==13.7.0"] in calls
@@ -77,19 +77,19 @@ def test_execute_skips_installed_apt(tmp_path: Path, capsys) -> None:  # type: i
             return completed(cmd, "install ok installed")
         return completed(cmd)
 
-    execute(Plan(apt=[apt_dep()]), tmp_path / "venv", runner=runner)
+    assert execute(Plan(apt=[apt_dep()]), tmp_path / "venv", runner=runner) is True
     assert ["sudo", "apt-get", "install", "-y", "python3-numpy"] not in calls
     assert "APT: already installed python3-numpy" in capsys.readouterr().out
 
 
 def test_execute_prints_noop_for_empty_plan(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
-    execute(Plan(), tmp_path / "venv")
+    assert execute(Plan(), tmp_path / "venv") is True
     assert "petal: no dependencies to install" in capsys.readouterr().out
 
 
 def test_execute_prints_distro_noop(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     dep = ResolvedDep(Dep("rclpy"), Source.DISTRO, resolved_version="3.3.7")
-    execute(Plan(distro=[dep]), tmp_path / "venv")
+    assert execute(Plan(distro=[dep]), tmp_path / "venv") is True
     assert "DISTRO: already provided rclpy" in capsys.readouterr().out
 
 
@@ -130,7 +130,7 @@ def test_frozen_allows_matching_lock(tmp_path: Path) -> None:
         calls.append(cmd)
         return completed(cmd)
 
-    execute(
+    assert execute(
         Plan(pip=[pip_dep("rich")]),
         tmp_path / "venv",
         frozen=True,
@@ -138,7 +138,7 @@ def test_frozen_allows_matching_lock(tmp_path: Path) -> None:
         runner=runner,
         install_runner=runner,
         assume_yes=True,
-    )
+    ) is True
     assert calls == [["uv", "pip", "install", "--python", str(tmp_path / "venv" / "bin" / "python"), "rich==13.7.0"]]
 
 
@@ -151,13 +151,13 @@ def test_execute_no_prompt_skips_install(tmp_path: Path, capsys) -> None:  # typ
         calls.append(cmd)
         return completed(cmd)
 
-    execute(
+    assert execute(
         Plan(apt=[apt_dep()], pip=[pip_dep()]),
         tmp_path / "venv",
         runner=runner,
         install_runner=runner,
         assume_no=True,
-    )
+    ) is False
 
     assert calls == []
     assert "install cancelled" in capsys.readouterr().out

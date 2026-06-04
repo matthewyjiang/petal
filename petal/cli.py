@@ -89,27 +89,26 @@ def _cmd_add(args: argparse.Namespace) -> int:
     distro = manifest.ros_distro or env.detect_ros_distro()
     venv = env.ensure_venv(workspace, distro)
     source_hint = Source.PIP if args.pip else Source.APT if args.apt else None
-    add_manifest_dep(
-        manifest_path,
-        args.name,
-        version_spec=args.spec or "",
-        source_hint=source_hint,
-        apt_pkg=args.spec or "" if args.apt else "",
-    )
-
     dep = _dep_from_add_args(args.name, args.spec or "", source_hint)
     manager = ResolutionManager(ros_distro=distro, venv=venv)
     resolved = [item for item in [manager.resolve(dep)] if item]
     plan = build_plan(resolved)
-    execute(
+    proceeded = execute(
         plan,
         venv,
         dry_run=args.dry_run,
         assume_yes=args.yes,
         assume_no=args.no,
-        workspace_root=workspace,
-        manifest_path=manifest_path,
     )
+    if proceeded:
+        add_manifest_dep(
+            manifest_path,
+            args.name,
+            version_spec=args.spec or "",
+            source_hint=source_hint,
+            apt_pkg=args.spec or "" if args.apt else "",
+        )
+        _rewrite_lock(workspace, manifest_path, distro, venv)
     return 0
 
 
