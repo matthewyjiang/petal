@@ -54,7 +54,10 @@ def test_ensure_venv_uses_system_site_packages(
             venv = Path(cmd[-1])
             (venv / "bin").mkdir(parents=True)
             (venv / "bin" / "python").write_text("", encoding="utf-8")
-            (venv / "pyvenv.cfg").write_text("version = 3.10.12\n", encoding="utf-8")
+            (venv / "pyvenv.cfg").write_text(
+                "version = 3.10.12\ninclude-system-site-packages = true\n",
+                encoding="utf-8",
+            )
             return subprocess.CompletedProcess(cmd, 0)
         return subprocess.CompletedProcess(cmd, 0, stdout="3.10\n", stderr="")
 
@@ -163,4 +166,29 @@ def test_ensure_venv_rejects_version_mismatch(
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="3.10\n", stderr=""))
 
     with pytest.raises(env.PetalEnvError, match="petal clean"):
+        env.ensure_venv(ws, "humble")
+
+
+def test_ensure_venv_rejects_missing_system_site_packages(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ros_root = tmp_path / "ros"
+    ws = tmp_path / "ws"
+    venv = ws / ".petal" / "venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").write_text("", encoding="utf-8")
+    (venv / "pyvenv.cfg").write_text(
+        "version = 3.10.12\ninclude-system-site-packages = false\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
+    make_ros(ros_root, "humble", "3.10")
+    monkeypatch.setattr(env, "distro_python", lambda distro: Path("/usr/bin/python3.10"))
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="3.10\n", stderr=""),
+    )
+
+    with pytest.raises(env.PetalEnvError, match="system site-packages"):
         env.ensure_venv(ws, "humble")

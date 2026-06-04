@@ -78,6 +78,17 @@ def _venv_version(venv: Path) -> str | None:
     return None
 
 
+def _venv_uses_system_site_packages(venv: Path) -> bool:
+    cfg = venv / "pyvenv.cfg"
+    if not cfg.exists():
+        return False
+    for line in cfg.read_text(encoding="utf-8").splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key.strip() == "include-system-site-packages":
+            return value.strip().lower() == "true"
+    return False
+
+
 def python_version(interpreter: Path) -> str:
     proc = subprocess.run(
         [str(interpreter), "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
@@ -99,6 +110,11 @@ def ensure_venv(workspace_root: Path, distro: str) -> Path:
         if existing_version and not existing_version.startswith(expected_version):
             raise PetalEnvError(
                 "Existing petal venv Python version does not match ROS distro. "
+                "Run `petal clean`, then `petal init`."
+            )
+        if not _venv_uses_system_site_packages(venv):
+            raise PetalEnvError(
+                "Existing petal venv does not include system site-packages. "
                 "Run `petal clean`, then `petal init`."
             )
         (venv / "COLCON_IGNORE").touch()
