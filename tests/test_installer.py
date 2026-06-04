@@ -32,7 +32,7 @@ def test_execute_dry_run_prints_commands(tmp_path: Path, capsys) -> None:  # typ
     assert "rich==13.7.0" in out
 
 
-def test_execute_installs_missing_apt_and_pip_then_writes_lock(tmp_path: Path) -> None:
+def test_execute_installs_missing_apt_and_pip_then_writes_lock(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     manifest = tmp_path / "petal.toml"
     manifest.write_text("[workspace]\nros_distro = \"humble\"\n", encoding="utf-8")
     calls: list[list[str]] = []
@@ -60,9 +60,13 @@ def test_execute_installs_missing_apt_and_pip_then_writes_lock(tmp_path: Path) -
     assert 'apt_pkg = "python3-numpy"' in lock
     assert 'name = "rich"' in lock
     assert 'version = "13.7.0"' in lock
+    out = capsys.readouterr().out
+    assert "APT: installing python3-numpy" in out
+    assert "PIP: installing rich==13.7.0" in out
+    assert "lock: wrote" in out
 
 
-def test_execute_skips_installed_apt(tmp_path: Path) -> None:
+def test_execute_skips_installed_apt(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     calls: list[list[str]] = []
 
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
@@ -73,6 +77,18 @@ def test_execute_skips_installed_apt(tmp_path: Path) -> None:
 
     execute(Plan(apt=[apt_dep()]), tmp_path / "venv", runner=runner)
     assert ["sudo", "apt-get", "install", "-y", "python3-numpy"] not in calls
+    assert "APT: already installed python3-numpy" in capsys.readouterr().out
+
+
+def test_execute_prints_noop_for_empty_plan(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    execute(Plan(), tmp_path / "venv")
+    assert "petal: no dependencies to install" in capsys.readouterr().out
+
+
+def test_execute_prints_distro_noop(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    dep = ResolvedDep(Dep("rclpy"), Source.DISTRO, resolved_version="3.3.7")
+    execute(Plan(distro=[dep]), tmp_path / "venv")
+    assert "DISTRO: already provided rclpy" in capsys.readouterr().out
 
 
 def test_write_lock_serializes_resolved_deps(tmp_path: Path) -> None:

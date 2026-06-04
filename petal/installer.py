@@ -36,26 +36,38 @@ def execute(
 
     apt_pkgs = [item.apt_pkg for item in plan.apt if item.apt_pkg]
     pip_reqs = [_pip_requirement(item) for item in plan.pip]
+    distro_names = [item.dep.name for item in plan.distro]
 
     if dry_run:
         _print_dry_run(apt_pkgs, pip_reqs, venv)
         return
 
+    if distro_names:
+        print("DISTRO: already provided " + ", ".join(distro_names))
+
     missing_apt = [pkg for pkg in apt_pkgs if not _apt_installed(pkg, runner)]
     if missing_apt:
+        print("APT: installing " + ", ".join(missing_apt))
         proc = runner(["sudo", "apt-get", "install", "-y", *missing_apt])
         if proc.returncode != 0:
             raise InstallerError(proc.stderr or "apt install failed")
+    elif apt_pkgs:
+        print("APT: already installed " + ", ".join(apt_pkgs))
 
     if pip_reqs:
+        print("PIP: installing " + ", ".join(pip_reqs))
         proc = runner(["uv", "pip", "install", "--python", str(venv_python(venv)), *pip_reqs])
         if proc.returncode != 0:
             pip_proc = runner([str(venv_python(venv)), "-m", "pip", "install", *pip_reqs])
             if pip_proc.returncode != 0:
                 raise InstallerError(pip_proc.stderr or proc.stderr or "pip install failed")
 
+    if not distro_names and not apt_pkgs and not pip_reqs:
+        print("petal: no dependencies to install")
+
     if workspace_root and manifest_path:
         write_lock(workspace_root / "petal.lock", manifest_path, [*plan.distro, *plan.apt, *plan.pip])
+        print(f"lock: wrote {workspace_root / 'petal.lock'}")
 
 
 def write_lock(lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]) -> None:
