@@ -45,13 +45,13 @@ petal add numpy
 PyPI package:
 
 ```bash
-petal add rich --pip
+petal add huggingface
 ```
 
-Colcon wrapper:
+Rosdep-resolved ROS package:
 
 ```bash
-colcon deps sync
+petal add cv_bridge
 ```
 
 ## Commands
@@ -81,7 +81,7 @@ python_version = "3.10"
 
 [deps]
 numpy = ">=1.24"
-rich = { pip = ">=13" }
+huggingface = ">=0.0.1"
 some-system-lib = { apt = "libfoo-dev" }
 
 [overrides]
