@@ -20,14 +20,20 @@ class Runner(Protocol):
 
 
 def default_runner(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        cmd,
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        **kwargs,
-    )
+    try:
+        return subprocess.run(
+            cmd,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            **kwargs,
+        )
+    except FileNotFoundError:
+        # Return a failed result so callers handle it the same as a non-zero exit.
+        return subprocess.CompletedProcess(
+            cmd, returncode=127, stdout="", stderr=f"{cmd[0]}: command not found"
+        )
 
 
 def canonical(name: str) -> str:

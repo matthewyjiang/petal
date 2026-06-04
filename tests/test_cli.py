@@ -3,9 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from petal import cli, env
+from petal import cli, env, preflight
 from petal.models import Dep, ResolvedDep, Source
 from petal.planner import Plan
+
+
+def _ok_preflight():
+    return preflight.PreflightReport()
 
 
 def test_init_writes_manifest_and_creates_venv(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -23,6 +27,7 @@ def test_init_writes_manifest_and_creates_venv(monkeypatch, tmp_path: Path, caps
 
 
 def test_sync_dry_run_orchestrates_resolution(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
         "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\nrich = \">=13\"\n",
         encoding="utf-8",
@@ -92,6 +97,7 @@ def test_activate_passes_shell_flag(monkeypatch, tmp_path: Path, capsys) -> None
 
 
 def test_status_exit_code_2_on_drift(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
         "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n",
         encoding="utf-8",

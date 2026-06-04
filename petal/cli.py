@@ -5,7 +5,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from petal import env
+from petal import env, preflight
 from petal.config import find_workspace_root, load_manifest, write_manifest
 from petal.discover.workspace import discover_workspace
 from petal.installer import InstallerError, execute
@@ -46,6 +46,7 @@ def _cmd_clean(args: argparse.Namespace) -> int:
 
 
 def _cmd_sync(args: argparse.Namespace) -> int:
+    preflight.assert_ok(preflight.check())
     workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
     manifest_path = workspace / "petal.toml"
     manifest = load_manifest(manifest_path) if manifest_path.exists() else None
@@ -69,6 +70,7 @@ def _cmd_sync(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
+    preflight.assert_ok(preflight.check())
     workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
     manifest_path = workspace / "petal.toml"
     manifest = load_manifest(manifest_path) if manifest_path.exists() else None
