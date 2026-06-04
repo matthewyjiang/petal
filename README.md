@@ -107,3 +107,9 @@ Unit tests use fake subprocess runners and do not require network, real ROS, apt
 ## Release
 
 Publishing runs from GitHub Actions when a `v*` tag is pushed. PyPI should be configured for trusted publishing with project `petal-ros`, owner `matthewyjiang`, repository `petal`, workflow `publish.yml`, and environment `pypi`.
+
+## Roadmap
+
+- Improve lock format with hashes for uv output
+- Add integration test in ROS Docker image
+- Improve resolver version pinning for apt/rosdep
