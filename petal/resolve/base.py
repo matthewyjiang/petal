@@ -19,6 +19,10 @@ class Runner(Protocol):
     def __call__(self, cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]: ...
 
 
+class StreamRunner(Protocol):
+    def __call__(self, cmd: list[str]) -> subprocess.CompletedProcess[str]: ...
+
+
 def default_runner(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
@@ -31,6 +35,15 @@ def default_runner(cmd: list[str], **kwargs: object) -> subprocess.CompletedProc
         )
     except FileNotFoundError:
         # Return a failed result so callers handle it the same as a non-zero exit.
+        return subprocess.CompletedProcess(
+            cmd, returncode=127, stdout="", stderr=f"{cmd[0]}: command not found"
+        )
+
+
+def default_stream_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(cmd, check=False, text=True)
+    except FileNotFoundError:
         return subprocess.CompletedProcess(
             cmd, returncode=127, stdout="", stderr=f"{cmd[0]}: command not found"
         )

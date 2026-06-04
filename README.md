@@ -104,6 +104,8 @@ petal init              # detect ROS distro/Python, create manifest and venv
 petal add <name> [spec] # add a dependency to petal.toml and sync it
 petal remove <name>     # remove a dependency from petal.toml and venv
 petal sync              # discover, resolve, install, write petal.lock
+petal sync --yes        # install without prompting
+petal sync --no         # print resolved plan and do not install
 petal sync --dry-run    # print apt/pip commands without installing
 petal sync --frozen     # enforce petal.lock
 petal status            # report drift; exits 2 when drift/missing/changed
@@ -119,9 +121,12 @@ petal add rich
 petal add scipy
 petal add numpy ">=1.24"
 petal add rich ">=13" --pip
+petal add rich --yes
 petal add opencv python3-opencv --apt
 petal remove rich
 ```
+
+`petal sync` and `petal add` print the resolved source for each dependency before installing. They prompt before mutating apt or pip unless `--yes` is passed. Install commands stream native apt/uv/pip output, so download progress remains visible. Pressing `Ctrl-C` exits cleanly; if apt was interrupted, run `sudo dpkg --configure -a` if apt asks you to repair dpkg state.
 
 `petal add` preserves other manifest sections such as `[overrides]`. `petal remove` drops the manifest entry and uninstalls pip packages from `.petal/venv`; it does not run `apt remove` for system packages.
 

@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from petal.config import load_lock, manifest_hash
 from petal.models import ResolvedDep, Source
 from petal.planner import Plan
-from petal.resolve.base import Runner, default_runner, dep_requirement, venv_python
+from petal.resolve.base import (
+    Runner,
+    StreamRunner,
+    default_runner,
+    default_stream_runner,
+    dep_requirement,
+    venv_python,
+)
 
 
 class InstallerError(RuntimeError):
@@ -22,6 +30,9 @@ def execute(
     workspace_root: Path | None = None,
     manifest_path: Path | None = None,
     runner: Runner = default_runner,
+    install_runner: StreamRunner = default_stream_runner,
+    assume_yes: bool = False,
+    assume_no: bool = False,
 ) -> None:
     if frozen:
         if not workspace_root:
@@ -38,6 +49,8 @@ def execute(
     pip_reqs = [_pip_requirement(item) for item in plan.pip]
     distro_names = [item.dep.name for item in plan.distro]
 
+    _print_plan(plan, venv)
+
     if dry_run:
         _print_dry_run(apt_pkgs, pip_reqs, venv)
         return
@@ -46,9 +59,21 @@ def execute(
         print("DISTRO: already provided " + ", ".join(distro_names))
 
     missing_apt = [pkg for pkg in apt_pkgs if not _apt_installed(pkg, runner)]
+    will_install = bool(missing_apt or pip_reqs)
+    if will_install and not _confirm_install(assume_yes=assume_yes, assume_no=assume_no):
+        print("petal: install cancelled")
+        return
+
     if missing_apt:
         print("APT: installing " + ", ".join(missing_apt))
-        proc = runner(["sudo", "apt-get", "install", "-y", *missing_apt])
+        try:
+            proc = install_runner(["sudo", "apt-get", "install", "-y", *missing_apt])
+        except KeyboardInterrupt:
+            print(
+                "petal: apt interrupted; you may need: sudo dpkg --configure -a",
+                file=sys.stderr,
+            )
+            raise
         if proc.returncode != 0:
             raise InstallerError(proc.stderr or "apt install failed")
     elif apt_pkgs:
@@ -56,9 +81,9 @@ def execute(
 
     if pip_reqs:
         print("PIP: installing " + ", ".join(pip_reqs))
-        proc = runner(["uv", "pip", "install", "--python", str(venv_python(venv)), *pip_reqs])
+        proc = install_runner(["uv", "pip", "install", "--python", str(venv_python(venv)), *pip_reqs])
         if proc.returncode != 0:
-            pip_proc = runner([str(venv_python(venv)), "-m", "pip", "install", *pip_reqs])
+            pip_proc = install_runner([str(venv_python(venv)), "-m", "pip", "install", *pip_reqs])
             if pip_proc.returncode != 0:
                 raise InstallerError(pip_proc.stderr or proc.stderr or "pip install failed")
 
@@ -117,6 +142,37 @@ def _pip_requirement(item: ResolvedDep) -> str:
     if item.resolved_version and not item.dep.name.startswith("git+"):
         return f"{item.dep.name}=={item.resolved_version}"
     return dep_requirement(item.dep)
+
+
+def _print_plan(plan: Plan, venv: Path) -> None:
+    items = [*plan.distro, *plan.apt, *plan.pip]
+    if not items:
+        return
+    print(f"Resolved {len(items)} dependencies:")
+    for item in plan.distro:
+        version = f" {item.resolved_version}" if item.resolved_version else ""
+        print(f"  {item.dep.name:<24} distro   provided by ROS/system{version}")
+    for item in plan.apt:
+        source = "rosdep/apt" if item.dep.source_hint == Source.ROSDEP else "apt"
+        target = item.apt_pkg or item.dep.name
+        version = f" {item.resolved_version}" if item.resolved_version else ""
+        print(f"  {item.dep.name:<24} {source:<9} {target}{version}")
+    for item in plan.pip:
+        print(
+            f"  {item.dep.name:<24} pip      "
+            f"{_pip_requirement(item)} -> {venv_python(venv)}"
+        )
+
+
+def _confirm_install(*, assume_yes: bool, assume_no: bool) -> bool:
+    if assume_yes:
+        return True
+    if assume_no:
+        return False
+    if not sys.stdin.isatty():
+        raise InstallerError("install requires confirmation; rerun with --yes")
+    answer = input("Proceed with install? [Y/n] ").strip().lower()
+    return answer in {"", "y", "yes"}
 
 
 def _print_dry_run(apt_pkgs: list[str], pip_reqs: list[str], venv: Path) -> None:

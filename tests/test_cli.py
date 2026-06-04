@@ -63,6 +63,44 @@ def test_sync_dry_run_orchestrates_resolution(monkeypatch, tmp_path: Path) -> No
     assert executed["plan"].pip[0].resolved_version == "13.7.0"
 
 
+def test_sync_yes_and_no_flags_pass_prompt_overrides(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
+    (tmp_path / "petal.toml").write_text(
+        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\nrich = \">=13\"\n",
+        encoding="utf-8",
+    )
+    venv = tmp_path / ".petal" / "venv"
+    calls = []
+    monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
+    monkeypatch.setattr(cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[]))
+
+    class FakeManager:
+        def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
+            pass
+
+        def resolve(self, dep: Dep) -> ResolvedDep:
+            return ResolvedDep(dep, Source.PIP, resolved_version="13.7.0")
+
+    monkeypatch.setattr(cli, "ResolutionManager", FakeManager)
+    monkeypatch.setattr(cli, "build_plan", lambda resolved: Plan(pip=resolved))
+
+    def fake_execute(plan, got_venv, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append((kwargs["assume_yes"], kwargs["assume_no"]))
+
+    monkeypatch.setattr(cli, "execute", fake_execute)
+
+    assert cli.main(["sync", "--workspace", str(tmp_path), "--yes"]) == 0
+    assert cli.main(["sync", "--workspace", str(tmp_path), "--no"]) == 0
+    assert calls == [(True, False), (False, True)]
+
+
+def test_main_handles_keyboard_interrupt(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(cli, "_cmd_status", lambda args: (_ for _ in ()).throw(KeyboardInterrupt))
+
+    assert cli.main(["status"]) == 130
+    assert "petal: cancelled" in capsys.readouterr().err
+
+
 def test_activate_prints_eval_snippet(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     (tmp_path / "petal.toml").write_text(
         '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n',

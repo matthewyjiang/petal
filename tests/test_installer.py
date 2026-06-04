@@ -49,6 +49,8 @@ def test_execute_installs_missing_apt_and_pip_then_writes_lock(tmp_path: Path, c
         workspace_root=tmp_path,
         manifest_path=manifest,
         runner=runner,
+        install_runner=runner,
+        assume_yes=True,
     )
 
     assert ["sudo", "apt-get", "install", "-y", "python3-numpy"] in calls
@@ -128,5 +130,39 @@ def test_frozen_allows_matching_lock(tmp_path: Path) -> None:
         calls.append(cmd)
         return completed(cmd)
 
-    execute(Plan(pip=[pip_dep("rich")]), tmp_path / "venv", frozen=True, workspace_root=tmp_path, runner=runner)
+    execute(
+        Plan(pip=[pip_dep("rich")]),
+        tmp_path / "venv",
+        frozen=True,
+        workspace_root=tmp_path,
+        runner=runner,
+        install_runner=runner,
+        assume_yes=True,
+    )
     assert calls == [["uv", "pip", "install", "--python", str(tmp_path / "venv" / "bin" / "python"), "rich==13.7.0"]]
+
+
+def test_execute_no_prompt_skips_install(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    calls: list[list[str]] = []
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[:2] == ["dpkg-query", "-W"]:
+            return completed(cmd, returncode=1)
+        calls.append(cmd)
+        return completed(cmd)
+
+    execute(
+        Plan(apt=[apt_dep()], pip=[pip_dep()]),
+        tmp_path / "venv",
+        runner=runner,
+        install_runner=runner,
+        assume_no=True,
+    )
+
+    assert calls == []
+    assert "install cancelled" in capsys.readouterr().out
+
+
+def test_execute_non_tty_requires_yes(tmp_path: Path) -> None:
+    with pytest.raises(InstallerError, match="--yes"):
+        execute(Plan(pip=[pip_dep()]), tmp_path / "venv")

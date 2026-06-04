@@ -64,6 +64,8 @@ def _cmd_sync(args: argparse.Namespace) -> int:
         venv,
         frozen=args.frozen,
         dry_run=args.dry_run,
+        assume_yes=args.yes or args.frozen,
+        assume_no=args.no,
         workspace_root=workspace,
         manifest_path=manifest_path,
     )
@@ -103,6 +105,8 @@ def _cmd_add(args: argparse.Namespace) -> int:
         plan,
         venv,
         dry_run=args.dry_run,
+        assume_yes=args.yes,
+        assume_no=args.no,
         workspace_root=workspace,
         manifest_path=manifest_path,
     )
@@ -189,6 +193,9 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--workspace")
     sync.add_argument("--dry-run", action="store_true")
     sync.add_argument("--frozen", action="store_true")
+    sync_prompt = sync.add_mutually_exclusive_group()
+    sync_prompt.add_argument("-y", "--yes", action="store_true", help="install without prompting")
+    sync_prompt.add_argument("--no", action="store_true", help="print plan and do not install")
     sync.set_defaults(func=_cmd_sync)
 
     add = sub.add_parser("add", help="add a dependency to petal.toml and sync it")
@@ -196,6 +203,9 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("spec", nargs="?", default="")
     add.add_argument("--workspace")
     add.add_argument("--dry-run", action="store_true")
+    add_prompt = add.add_mutually_exclusive_group()
+    add_prompt.add_argument("-y", "--yes", action="store_true", help="install without prompting")
+    add_prompt.add_argument("--no", action="store_true", help="print plan and do not install")
     source = add.add_mutually_exclusive_group()
     source.add_argument("--pip", action="store_true")
     source.add_argument("--apt", action="store_true")
@@ -218,6 +228,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
+    except KeyboardInterrupt:
+        print("petal: cancelled", file=sys.stderr)
+        return 130
     except (env.PetalEnvError, PlannerConflict, InstallerError) as exc:
         print(f"petal: {exc}", file=sys.stderr)
         return 1
