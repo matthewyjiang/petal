@@ -35,3 +35,7 @@
 - `Source.ROSDEP` deps from `package.xml` still need distro guard first so `rclpy` resolves to `DISTRO` no-op.
 - Planner conflict checks must happen before installer mutates apt or pip state.
 - `petal status` returns exit code `2` for drift/missing/manifest hash changes; tests assert this.
+
+## Release
+
+Publishing runs from GitHub Actions when a `v*` tag is pushed. PyPI should be configured for trusted publishing with project `petal-ros`, owner `matthewyjiang`, repository `petal`, workflow `publish.yml`, and environment `pypi`.
