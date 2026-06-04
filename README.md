@@ -103,5 +103,3 @@ uv run --with pytest pytest -q
 ```
 
 Unit tests use fake subprocess runners and do not require network, real ROS, apt, rosdep, uv, or colcon.
-
-
