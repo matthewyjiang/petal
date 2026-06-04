@@ -31,7 +31,11 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 def _cmd_activate(args: argparse.Namespace) -> int:
     workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
-    print(workspace / ".petal" / "activate")
+    manifest_path = workspace / "petal.toml"
+    manifest = load_manifest(manifest_path) if manifest_path.exists() else None
+    distro = manifest.ros_distro if manifest and manifest.ros_distro else env.detect_ros_distro()
+    shell = getattr(args, "shell", None) or None
+    print(env.activation_snippet(workspace, distro, shell), end="")
     return 0
 
 
@@ -85,8 +89,17 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--workspace")
     init.set_defaults(func=_cmd_init)
 
-    activate = sub.add_parser("activate", help="print activation helper path")
+    activate = sub.add_parser(
+        "activate",
+        help="print eval-able shell snippet to activate petal env (eval \"$(petal activate)\")",
+    )
     activate.add_argument("--workspace")
+    activate.add_argument(
+        "--shell",
+        choices=["bash", "zsh", "fish"],
+        default=None,
+        help="shell dialect (default: auto-detect from $SHELL)",
+    )
     activate.set_defaults(func=_cmd_activate)
 
     clean = sub.add_parser("clean", help="remove petal venv")

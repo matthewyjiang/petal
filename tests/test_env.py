@@ -69,6 +69,67 @@ def test_ensure_venv_uses_system_site_packages(
     assert "source .petal/venv/bin/activate" in activate
 
 
+def test_activation_snippet_bash(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ros_root = tmp_path / "ros"
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
+    setup = ros_root / "humble" / "setup.bash"
+    setup.parent.mkdir(parents=True)
+    setup.write_text("", encoding="utf-8")
+
+    snippet = env.activation_snippet(ws, "humble", shell="bash")
+    assert f'export VIRTUAL_ENV="{ws / ".petal" / "venv"}"' in snippet
+    assert 'export PATH="$VIRTUAL_ENV/bin:$PATH"' in snippet
+    assert "unset PYTHONHOME" in snippet
+    assert f"source {setup}" in snippet
+
+
+def test_activation_snippet_zsh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ros_root = tmp_path / "ros"
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
+    setup = ros_root / "humble" / "setup.bash"
+    setup.parent.mkdir(parents=True)
+    setup.write_text("", encoding="utf-8")
+
+    snippet = env.activation_snippet(ws, "humble", shell="zsh")
+    assert 'export VIRTUAL_ENV=' in snippet
+    assert 'export PATH=' in snippet
+
+
+def test_activation_snippet_fish(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ros_root = tmp_path / "ros"
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
+    setup_fish = ros_root / "humble" / "setup.fish"
+    setup_fish.parent.mkdir(parents=True)
+    setup_fish.write_text("", encoding="utf-8")
+
+    snippet = env.activation_snippet(ws, "humble", shell="fish")
+    assert "set -gx VIRTUAL_ENV" in snippet
+    assert "fish_add_path" in snippet
+    assert "set -e PYTHONHOME" in snippet
+    assert f"source {setup_fish}" in snippet
+
+
+def test_activation_snippet_auto_detects_shell(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ros_root = tmp_path / "ros"
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    (ros_root / "humble").mkdir(parents=True)
+
+    snippet = env.activation_snippet(ws, "humble", shell=None)
+    # zsh uses same bash-style exports
+    assert "export VIRTUAL_ENV" in snippet
+
+
 def test_ensure_venv_rejects_version_mismatch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

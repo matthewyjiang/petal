@@ -130,6 +130,47 @@ def _write_activate(workspace_root: Path, distro: str) -> Path:
     return activate
 
 
+def _detect_shell() -> str:
+    """Return shell name (bash/zsh/fish) from $SHELL, defaulting to bash."""
+    shell_path = os.environ.get("SHELL", "")
+    name = Path(shell_path).name
+    if name in ("bash", "zsh", "fish"):
+        return name
+    return "bash"
+
+
+def activation_snippet(workspace_root: Path, distro: str, shell: str | None = None) -> str:
+    """Return an eval-able shell snippet that activates the petal venv + ROS env."""
+    if shell is None:
+        shell = _detect_shell()
+    venv = venv_path(workspace_root)
+    ros_setup_bash = _ros_root() / distro / "setup.bash"
+    ros_setup_fish = _ros_root() / distro / "setup.fish"
+
+    if shell == "fish":
+        lines = [
+            f'set -gx VIRTUAL_ENV "{venv}"',
+            'fish_add_path "$VIRTUAL_ENV/bin"',
+            "set -e PYTHONHOME",
+        ]
+        if ros_setup_fish.exists():
+            lines.append(f"source {ros_setup_fish}")
+        elif ros_setup_bash.exists():
+            # fish can't source bash; best effort note
+            lines.append(f"# NOTE: source {ros_setup_bash} in a bash shell first")
+        return "\n".join(lines) + "\n"
+    else:
+        # bash / zsh
+        lines = [
+            f'export VIRTUAL_ENV="{venv}"',
+            'export PATH="$VIRTUAL_ENV/bin:$PATH"',
+            "unset PYTHONHOME",
+        ]
+        if ros_setup_bash.exists():
+            lines.append(f"source {ros_setup_bash}")
+        return "\n".join(lines) + "\n"
+
+
 def distro_provided_modules(distro: str) -> set[str]:
     interpreter = distro_python(distro)
     code = """
