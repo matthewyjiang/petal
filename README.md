@@ -43,6 +43,41 @@ petal status
 
 `petal init` writes `petal.toml`, creates `.petal/venv`, and writes `.petal/activate`.
 
+## Install
+
+Prerequisites:
+
+- Python 3.10+
+- ROS2 installed under `/opt/ros/<distro>`
+- `rosdep`, `apt-cache`, and `dpkg-query` available for full resolution
+- `uv` recommended; petal falls back to pip for installs when needed
+
+Install from GitHub:
+
+```bash
+python3 -m pip install git+https://github.com/matthewyjiang/petal.git
+```
+
+Install for local development:
+
+```bash
+git clone https://github.com/matthewyjiang/petal.git
+cd petal
+python3 -m pip install -e .
+```
+
+If your system Python does not have pip installed, use `uv`:
+
+```bash
+uv tool install git+https://github.com/matthewyjiang/petal.git
+```
+
+Verify the CLI is available:
+
+```bash
+petal --help
+```
+
 ## Manifest
 
 `petal.toml` is the human-edited source of truth:
