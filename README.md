@@ -36,6 +36,7 @@ From a ROS2 workspace root:
 
 ```bash
 petal init
+petal add rich ">=13" --pip
 petal sync --dry-run
 petal sync
 petal status
@@ -100,13 +101,26 @@ ml_collections = { pip = "ml-collections" }
 
 ```bash
 petal init              # detect ROS distro/Python, create manifest and venv
+petal add <name> [spec] # add a dependency to petal.toml and sync it
+petal remove <name>     # remove a dependency from petal.toml and venv
 petal sync              # discover, resolve, install, write petal.lock
 petal sync --dry-run    # print apt/pip commands without installing
 petal sync --frozen     # enforce petal.lock
 petal status            # report drift; exits 2 when drift/missing/changed
-petal activate          # print activation helper path
+petal activate          # print shell snippet to source ROS and venv
 petal clean             # remove .petal/venv
 ```
+
+Examples:
+
+```bash
+petal add rich ">=13" --pip
+petal add opencv python3-opencv --apt
+petal add numpy ">=1.24"
+petal remove rich
+```
+
+`petal add` preserves other manifest sections such as `[overrides]`. `petal remove` drops the manifest entry and uninstalls pip packages from `.petal/venv`; it does not run `apt remove` for system packages.
 
 Colcon wrapper:
 
