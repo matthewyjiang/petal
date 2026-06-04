@@ -18,11 +18,12 @@
 - Installer dry-run, lock writer, and `sync --dry-run` orchestration tests pass.
 - Status/drift and frozen lock enforcement tests pass.
 - Colcon verb wrapper tests pass.
+- `petal add` and `petal remove` tests pass.
 
 ## Verification
 
 - Last passing command: `uv run --with pytest pytest -q`
-- Result: `42 passed`
+- Result: `64 passed`
 
 ## Milestone Tracker
 
@@ -35,6 +36,7 @@
 | M5: installer + lock | Done | Added installer, dry-run command output, apt installed check, uv/pip install fallback, lock writer, `petal sync --dry-run`. |
 | M6: status/drift + frozen | Done | Added lock loader, status report, apt/pip/distro checks, manifest hash drift, exit code 2, frozen lock enforcement. |
 | M7: colcon verb | Done | Added `colcon deps` verb wrapper for `sync` and `status`, with entry point and tests. |
+| H1: add/remove commands | Done | Added manifest-preserving `petal add` / `petal remove`, pip uninstall fallback, and tests. |
 
 ## Implemented Files
 
@@ -62,6 +64,7 @@
 - `petal/status.py`
 - `petal/colcon_ext/__init__.py`
 - `petal/colcon_ext/verb.py`
+- `tests/test_config.py`
 - `tests/test_cli.py`
 - `tests/test_discovery.py`
 - `tests/test_env.py`
@@ -79,6 +82,5 @@
 Next hardening work:
 
 - improve lock format with hashes for uv output
-- add `petal add` and `petal remove`
 - add integration test in ROS Docker image
 - improve resolver version pinning for apt/rosdep

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
+
+from packaging.utils import canonicalize_name
 
 try:
     import tomllib
@@ -9,6 +12,10 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 only
     import tomli as tomllib
 
 from petal.models import Dep, Lock, Manifest, ResolvedDep, Source
+
+
+_SECTION_RE = re.compile(r"^\s*\[[^\]]+\]\s*(?:#.*)?$")
+_KEY_RE = re.compile(r"^\s*(?P<key>[A-Za-z0-9_-]+|\"[^\"]+\")\s*=")
 
 
 def find_workspace_root(start: Path | None = None) -> Path:
@@ -32,9 +39,127 @@ def write_manifest(path: Path, *, ros_distro: str, python_version: str) -> None:
     )
 
 
+def add_manifest_dep(
+    path: Path,
+    name: str,
+    *,
+    version_spec: str = "",
+    source_hint: Source | None = None,
+    apt_pkg: str = "",
+) -> None:
+    lines = _manifest_lines(path)
+    start, end = _deps_span(lines)
+    entry = _render_dep_entry(name, version_spec, source_hint, apt_pkg)
+    key = _dep_key(name)
+
+    for index in range(start, end):
+        if _line_key(lines[index]) == key:
+            lines[index] = _render_dep_entry(_raw_line_key(lines[index]) or name, version_spec, source_hint, apt_pkg)
+            _write_manifest_lines(path, lines)
+            return
+
+    insert_at = end
+    while insert_at > start and not lines[insert_at - 1].strip():
+        insert_at -= 1
+    lines.insert(insert_at, entry)
+    _write_manifest_lines(path, lines)
+
+
+def remove_manifest_dep(path: Path, name: str) -> bool:
+    lines = _manifest_lines(path)
+    start, end = _deps_span(lines)
+    key = _dep_key(name)
+    for index in range(start, end):
+        if _line_key(lines[index]) == key:
+            del lines[index]
+            _write_manifest_lines(path, lines)
+            return True
+    return False
+
+
 def manifest_hash(path: Path) -> str:
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     return f"sha256:{digest}"
+
+
+def _manifest_lines(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8")
+    return text.splitlines()
+
+
+def _write_manifest_lines(path: Path, lines: list[str]) -> None:
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _deps_span(lines: list[str]) -> tuple[int, int]:
+    for index, line in enumerate(lines):
+        if line.strip() == "[deps]":
+            start = index + 1
+            end = len(lines)
+            for next_index in range(start, len(lines)):
+                if _SECTION_RE.match(lines[next_index]):
+                    end = next_index
+                    break
+            return start, end
+
+    if lines and lines[-1].strip():
+        lines.append("")
+    lines.append("[deps]")
+    return len(lines), len(lines)
+
+
+def _render_dep_entry(
+    name: str,
+    version_spec: str,
+    source_hint: Source | None,
+    apt_pkg: str,
+) -> str:
+    key = _toml_key(name)
+    spec = version_spec or "*"
+    if source_hint == Source.PIP:
+        return f'{key} = {{ pip = "{_escape_toml_string(spec)}" }}'
+    if source_hint == Source.APT:
+        pkg = apt_pkg or _python_apt_name(name)
+        return f'{key} = {{ apt = "{_escape_toml_string(pkg)}" }}'
+    return f'{key} = "{_escape_toml_string(spec)}"'
+
+
+def _line_key(line: str) -> str:
+    key = _raw_line_key(line)
+    return _dep_key(key) if key else ""
+
+
+def _raw_line_key(line: str) -> str:
+    match = _KEY_RE.match(line)
+    if not match:
+        return ""
+    key = match.group("key")
+    if key.startswith('"') and key.endswith('"'):
+        key = key[1:-1]
+    return key
+
+
+def _dep_key(name: str) -> str:
+    return canonicalize_name(name.replace("_", "-"))
+
+
+def _toml_key(name: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        return name
+    return f'"{_escape_toml_string(name)}"'
+
+
+def _escape_toml_string(value: str) -> str:
+    return value.replace('\\', '\\\\').replace('"', '\\"')
+
+
+def _python_apt_name(name: str) -> str:
+    value = _dep_key(name)
+    if value.startswith("python3-"):
+        return value
+    return f"python3-{value}"
 
 
 def load_manifest(path: Path) -> Manifest:

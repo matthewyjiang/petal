@@ -69,6 +69,28 @@ def write_lock(lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]
     lock_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def uninstall(
+    name: str,
+    venv: Path,
+    *,
+    dry_run: bool = False,
+    runner: Runner = default_runner,
+) -> None:
+    uv_cmd = ["uv", "pip", "uninstall", "--python", str(venv_python(venv)), name]
+    if dry_run:
+        print("PIP uninstall:")
+        print(" ".join(uv_cmd))
+        return
+
+    proc = runner(uv_cmd)
+    if proc.returncode == 0:
+        return
+
+    pip_proc = runner([str(venv_python(venv)), "-m", "pip", "uninstall", "-y", name])
+    if pip_proc.returncode != 0:
+        raise InstallerError(pip_proc.stderr or proc.stderr or "pip uninstall failed")
+
+
 def _lock_entry(item: ResolvedDep) -> list[str]:
     lines = ["[[resolved]]", f'name = "{item.dep.name}"', f'source = "{item.chosen_source.value}"']
     if item.apt_pkg:

@@ -6,12 +6,13 @@ import sys
 from pathlib import Path
 
 from petal import env, preflight
-from petal.config import find_workspace_root, load_manifest, write_manifest
+from petal.config import add_manifest_dep, find_workspace_root, load_manifest, remove_manifest_dep, write_manifest
 from petal.discover.workspace import discover_workspace
-from petal.installer import InstallerError, execute
+from petal.installer import InstallerError, execute, uninstall, write_lock
 from petal.planner import PlannerConflict, build_plan
 from petal.resolve.manager import ResolutionManager
 from petal.status import check_status, print_report
+from petal.models import Dep, Source
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
@@ -69,6 +70,82 @@ def _cmd_sync(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_add(args: argparse.Namespace) -> int:
+    preflight.assert_ok(preflight.check())
+    workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
+    manifest_path = workspace / "petal.toml"
+    if not manifest_path.exists():
+        distro = env.detect_ros_distro()
+        interpreter = env.distro_python(distro)
+        write_manifest(
+            manifest_path,
+            ros_distro=distro,
+            python_version=env.python_version(interpreter),
+        )
+
+    manifest = load_manifest(manifest_path)
+    distro = manifest.ros_distro or env.detect_ros_distro()
+    venv = env.ensure_venv(workspace, distro)
+    source_hint = Source.PIP if args.pip else Source.APT if args.apt else None
+    add_manifest_dep(
+        manifest_path,
+        args.name,
+        version_spec=args.spec or "",
+        source_hint=source_hint,
+        apt_pkg=args.spec or "" if args.apt else "",
+    )
+
+    dep = _dep_from_add_args(args.name, args.spec or "", source_hint)
+    manager = ResolutionManager(ros_distro=distro, venv=venv)
+    resolved = [item for item in [manager.resolve(dep)] if item]
+    plan = build_plan(resolved)
+    execute(
+        plan,
+        venv,
+        dry_run=args.dry_run,
+        workspace_root=workspace,
+        manifest_path=manifest_path,
+    )
+    return 0
+
+
+def _cmd_remove(args: argparse.Namespace) -> int:
+    preflight.assert_ok(preflight.check())
+    workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
+    manifest_path = workspace / "petal.toml"
+    if not manifest_path.exists():
+        print("petal.toml missing; nothing to remove")
+        return 0
+
+    manifest = load_manifest(manifest_path)
+    distro = manifest.ros_distro or env.detect_ros_distro()
+    venv = env.ensure_venv(workspace, distro)
+    if not remove_manifest_dep(manifest_path, args.name):
+        print(f"{args.name} not present in petal.toml")
+        return 0
+
+    uninstall(args.name, venv, dry_run=args.dry_run)
+    if not args.dry_run:
+        _rewrite_lock(workspace, manifest_path, distro, venv)
+    return 0
+
+
+def _dep_from_add_args(name: str, spec: str, source_hint: Source | None) -> Dep:
+    if source_hint == Source.APT:
+        return Dep(name=spec or name, source_hint=Source.APT)
+    return Dep(name=name, version_spec=spec, source_hint=source_hint)
+
+
+def _rewrite_lock(workspace: Path, manifest_path: Path, distro: str, venv: Path) -> None:
+    manifest = load_manifest(manifest_path)
+    discovered = discover_workspace(workspace)
+    deps = [*manifest.deps, *discovered.deps]
+    manager = ResolutionManager(ros_distro=distro, venv=venv)
+    resolved = [item for dep in deps if (item := manager.resolve(dep))]
+    plan = build_plan(resolved)
+    write_lock(workspace / "petal.lock", manifest_path, [*plan.distro, *plan.apt, *plan.pip])
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     preflight.assert_ok(preflight.check())
     workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
@@ -113,6 +190,22 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--dry-run", action="store_true")
     sync.add_argument("--frozen", action="store_true")
     sync.set_defaults(func=_cmd_sync)
+
+    add = sub.add_parser("add", help="add a dependency to petal.toml and sync it")
+    add.add_argument("name")
+    add.add_argument("spec", nargs="?", default="")
+    add.add_argument("--workspace")
+    add.add_argument("--dry-run", action="store_true")
+    source = add.add_mutually_exclusive_group()
+    source.add_argument("--pip", action="store_true")
+    source.add_argument("--apt", action="store_true")
+    add.set_defaults(func=_cmd_add)
+
+    remove = sub.add_parser("remove", help="remove a dependency from petal.toml")
+    remove.add_argument("name")
+    remove.add_argument("--workspace")
+    remove.add_argument("--dry-run", action="store_true")
+    remove.set_defaults(func=_cmd_remove)
 
     status = sub.add_parser("status", help="report manifest/lock/install drift")
     status.add_argument("--workspace")
