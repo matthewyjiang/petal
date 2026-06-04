@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>pkg_ignored</name>
+  <version>0.0.1</version>
+  <description>fixture</description>
+  <maintainer email="dev@example.com">dev</maintainer>
+  <license>MIT</license>
+  <depend>should_not_appear</depend>
+</package>

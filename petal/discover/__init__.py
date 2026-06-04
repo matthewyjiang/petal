@@ -1,0 +1,1 @@
+"""Workspace dependency discovery."""

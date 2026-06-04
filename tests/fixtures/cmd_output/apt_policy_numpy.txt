@@ -1,0 +1,6 @@
+python3-numpy:
+  Installed: (none)
+  Candidate: 1:1.24.2-1ubuntu1
+  Version table:
+     1:1.24.2-1ubuntu1 500
+        500 http://archive.ubuntu.com/ubuntu noble/main amd64 Packages

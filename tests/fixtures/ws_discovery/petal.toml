@@ -1,0 +1,8 @@
+[workspace]
+ros_distro = "humble"
+python_version = "3.10"
+
+[deps]
+
+[overrides]
+ml_collections = { pip = "ml-collections" }

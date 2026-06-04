@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>pkg_a</name>
+  <version>0.0.1</version>
+  <description>fixture</description>
+  <maintainer email="dev@example.com">dev</maintainer>
+  <license>MIT</license>
+  <depend>rclpy</depend>
+  <exec_depend>numpy</exec_depend>
+  <test_depend>pytest</test_depend>
+</package>
