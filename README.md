@@ -36,7 +36,7 @@ From a ROS2 workspace root:
 
 ```bash
 petal init
-petal add rich ">=13" --pip
+petal add numpy
 petal sync --dry-run
 petal sync
 petal status
@@ -114,9 +114,12 @@ petal clean             # remove .petal/venv
 Examples:
 
 ```bash
+petal add numpy
+petal add rich
+petal add scipy
+petal add numpy ">=1.24"
 petal add rich ">=13" --pip
 petal add opencv python3-opencv --apt
-petal add numpy ">=1.24"
 petal remove rich
 ```
 
