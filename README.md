@@ -96,6 +96,26 @@ ml_collections = { pip = "ml-collections" }
 
 Resolution order: ROS/system modules, `rosdep`, apt (`python3-<name>`), then PyPI.
 
+## Colcon Verb
+
+Petal ships a `colcon deps` verb. Install with the colcon extra:
+
+```bash
+uv tool install "petal-ros[colcon]"
+```
+
+Then from a ROS2 workspace root:
+
+```bash
+colcon deps sync              # resolve and install dependencies
+colcon deps status            # report drift; exits 2 on drift/missing/change
+colcon deps sync --dry-run    # show plan, install nothing
+colcon deps sync --frozen     # enforce petal.lock
+colcon deps sync --workspace /path/to/ws  # explicit workspace path
+```
+
+`colcon deps` is a thin wrapper around `petal sync` / `petal status` and honours the same flags.
+
 ## Development
 
 ```bash
