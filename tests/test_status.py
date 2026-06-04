@@ -61,6 +61,47 @@ def test_status_reports_drift_missing_and_manifest_change(tmp_path: Path) -> Non
     assert report.missing == ["rich", "rclpy"]
 
 
+def test_status_accepts_importable_apt_python_dep_when_dpkg_missing(tmp_path: Path) -> None:
+    ws = make_workspace(tmp_path)
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[:2] == ["dpkg-query", "-W"]:
+            return completed(cmd, returncode=1)
+        if cmd[:3] == ["uv", "pip", "list"]:
+            return completed(cmd, '[{"name":"rich","version":"13.7.0"}]')
+        if cmd[-2:] == ["-c", "import numpy"]:
+            return completed(cmd)
+        if cmd[-2:] == ["-c", "import rclpy"]:
+            return completed(cmd)
+        return completed(cmd, returncode=1)
+
+    report = check_status(ws, ws / ".petal" / "venv", runner)
+
+    assert report.ok
+    assert report.in_sync == ["numpy", "rich", "rclpy"]
+    assert report.missing == []
+
+
+def test_status_uses_known_import_name_for_distro_dep(tmp_path: Path) -> None:
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text("[workspace]\nros_distro = \"humble\"\n", encoding="utf-8")
+    write_lock(
+        tmp_path / "petal.lock",
+        manifest,
+        [ResolvedDep(Dep("pyyaml"), Source.DISTRO)],
+    )
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[-2:] == ["-c", "import yaml"]:
+            return completed(cmd)
+        return completed(cmd, returncode=1)
+
+    report = check_status(tmp_path, tmp_path / ".petal" / "venv", runner)
+
+    assert report.ok
+    assert report.in_sync == ["pyyaml"]
+
+
 def test_print_report(capsys) -> None:  # type: ignore[no-untyped-def]
     ws_report = check_status(Path("/does/not/exist"), Path("/venv"), lambda cmd, **kwargs: completed(cmd))
     print_report(ws_report)

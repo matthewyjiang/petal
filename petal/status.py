@@ -7,6 +7,7 @@ from pathlib import Path
 from petal.config import load_lock, manifest_hash
 from petal.models import ResolvedDep, Source
 from petal.resolve.base import Runner, default_runner, venv_python
+from petal.resolve.distro import DistroResolver
 
 
 @dataclass
@@ -38,7 +39,12 @@ def check_status(workspace_root: Path, venv: Path, runner: Runner = default_runn
         name = item.dep.name
         if item.chosen_source == Source.APT:
             actual = _apt_version(item.apt_pkg, runner)
-            _bucket(report, name, actual, item.resolved_version)
+            if actual:
+                _bucket(report, name, actual, item.resolved_version)
+            elif _python_importable(name, venv, runner):
+                report.in_sync.append(name)
+            else:
+                report.missing.append(name)
         elif item.chosen_source == Source.PIP:
             if pip_versions is None:
                 pip_versions = _pip_versions(venv, runner)
@@ -85,6 +91,10 @@ def _pip_versions(venv: Path, runner: Runner) -> dict[str, str]:
 
 
 def _distro_importable(name: str, venv: Path, runner: Runner) -> bool:
-    module = name.replace("-", "_")
+    return _python_importable(name, venv, runner)
+
+
+def _python_importable(name: str, venv: Path, runner: Runner) -> bool:
+    module = DistroResolver._import_name(name)
     proc = runner([str(venv_python(venv)), "-c", f"import {module}"])
     return proc.returncode == 0
