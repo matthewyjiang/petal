@@ -85,18 +85,36 @@ def test_activation_snippet_bash(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert f"source {setup}" in snippet
 
 
-def test_activation_snippet_zsh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_activation_snippet_zsh_prefers_setup_zsh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ros_root = tmp_path / "ros"
     ws = tmp_path / "ws"
     ws.mkdir()
     monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
-    setup = ros_root / "humble" / "setup.bash"
-    setup.parent.mkdir(parents=True)
-    setup.write_text("", encoding="utf-8")
+    ros_dir = ros_root / "humble"
+    ros_dir.mkdir(parents=True)
+    (ros_dir / "setup.bash").write_text("", encoding="utf-8")
+    setup_zsh = ros_dir / "setup.zsh"
+    setup_zsh.write_text("", encoding="utf-8")
 
     snippet = env.activation_snippet(ws, "humble", shell="zsh")
     assert 'export VIRTUAL_ENV=' in snippet
     assert 'export PATH=' in snippet
+    assert f"source {setup_zsh}" in snippet
+    assert "setup.bash" not in snippet
+
+
+def test_activation_snippet_zsh_fallback_to_bash(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ros_root = tmp_path / "ros"
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
+    ros_dir = ros_root / "humble"
+    ros_dir.mkdir(parents=True)
+    setup_bash = ros_dir / "setup.bash"
+    setup_bash.write_text("", encoding="utf-8")
+
+    snippet = env.activation_snippet(ws, "humble", shell="zsh")
+    assert f"source {setup_bash}" in snippet
 
 
 def test_activation_snippet_fish(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

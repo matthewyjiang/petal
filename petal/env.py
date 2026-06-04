@@ -139,13 +139,29 @@ def _detect_shell() -> str:
     return "bash"
 
 
+def _ros_setup_for_shell(distro: str, shell: str) -> Path | None:
+    """Return the best ROS setup file for the given shell, or None if none exist."""
+    ros_dir = _ros_root() / distro
+    if shell == "fish":
+        candidates = ["setup.fish", "setup.bash"]
+    elif shell == "zsh":
+        candidates = ["setup.zsh", "setup.sh", "setup.bash"]
+    else:
+        # bash and anything else
+        candidates = ["setup.bash", "setup.sh"]
+    for name in candidates:
+        path = ros_dir / name
+        if path.exists():
+            return path
+    return None
+
+
 def activation_snippet(workspace_root: Path, distro: str, shell: str | None = None) -> str:
     """Return an eval-able shell snippet that activates the petal venv + ROS env."""
     if shell is None:
         shell = _detect_shell()
     venv = venv_path(workspace_root)
-    ros_setup_bash = _ros_root() / distro / "setup.bash"
-    ros_setup_fish = _ros_root() / distro / "setup.fish"
+    ros_setup = _ros_setup_for_shell(distro, shell)
 
     if shell == "fish":
         lines = [
@@ -153,21 +169,21 @@ def activation_snippet(workspace_root: Path, distro: str, shell: str | None = No
             'fish_add_path "$VIRTUAL_ENV/bin"',
             "set -e PYTHONHOME",
         ]
-        if ros_setup_fish.exists():
-            lines.append(f"source {ros_setup_fish}")
-        elif ros_setup_bash.exists():
-            # fish can't source bash; best effort note
-            lines.append(f"# NOTE: source {ros_setup_bash} in a bash shell first")
+        if ros_setup is not None and ros_setup.suffix == ".fish":
+            lines.append(f"source {ros_setup}")
+        elif ros_setup is not None:
+            # fish can't source bash/sh; best effort note
+            lines.append(f"# NOTE: source {ros_setup} in a bash shell first")
         return "\n".join(lines) + "\n"
     else:
-        # bash / zsh
+        # bash / zsh / sh-compatible
         lines = [
             f'export VIRTUAL_ENV="{venv}"',
             'export PATH="$VIRTUAL_ENV/bin:$PATH"',
             "unset PYTHONHOME",
         ]
-        if ros_setup_bash.exists():
-            lines.append(f"source {ros_setup_bash}")
+        if ros_setup is not None:
+            lines.append(f"source {ros_setup}")
         return "\n".join(lines) + "\n"
 
 
