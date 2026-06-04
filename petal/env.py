@@ -157,7 +157,7 @@ def _ros_setup_for_shell(distro: str, shell: str) -> Path | None:
 
 
 def activation_snippet(workspace_root: Path, distro: str, shell: str | None = None) -> str:
-    """Return an eval-able shell snippet that activates the petal venv + ROS env."""
+    """Return a shell snippet to activate the petal venv + ROS env (use: source <(petal activate))."""
     if shell is None:
         shell = _detect_shell()
     venv = venv_path(workspace_root)

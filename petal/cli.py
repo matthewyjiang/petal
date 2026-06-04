@@ -91,7 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     activate = sub.add_parser(
         "activate",
-        help="print eval-able shell snippet to activate petal env (eval \"$(petal activate)\")",
+        help="print shell snippet to activate petal env (source <(petal activate))",
     )
     activate.add_argument("--workspace")
     activate.add_argument(
