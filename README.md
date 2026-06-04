@@ -9,7 +9,13 @@ Petal is dependency management, not node isolation. ROS2 still runs in one share
 ## Install
 
 ```bash
-python3 -m pip install git+https://github.com/matthewyjiang/petal.git
+uv tool install petal-ros
+```
+
+If you use the colcon verb, install the colcon extra:
+
+```bash
+uv tool install "petal-ros[colcon]"
 ```
 
 Local development:
@@ -97,3 +103,7 @@ uv run --with pytest pytest -q
 ```
 
 Unit tests use fake subprocess runners and do not require network, real ROS, apt, rosdep, uv, or colcon.
+
+## Release
+
+Publishing runs from GitHub Actions when a `v*` tag is pushed. PyPI should be configured for trusted publishing with project `petal-ros`, owner `matthewyjiang`, repository `petal`, workflow `publish.yml`, and environment `pypi`.
