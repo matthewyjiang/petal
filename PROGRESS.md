@@ -8,6 +8,7 @@
 - M4 complete.
 - M5 complete.
 - M6 complete.
+- M7 complete.
 - Package scaffold exists.
 - `petal init`, `petal activate`, and `petal clean` exist.
 - Env detection and venv creation tests pass.
@@ -16,11 +17,12 @@
 - Planner conflict detection tests pass.
 - Installer dry-run, lock writer, and `sync --dry-run` orchestration tests pass.
 - Status/drift and frozen lock enforcement tests pass.
+- Colcon verb wrapper tests pass.
 
 ## Verification
 
 - Last passing command: `uv run --with pytest pytest -q`
-- Result: `39 passed`
+- Result: `42 passed`
 
 ## Milestone Tracker
 
@@ -32,7 +34,7 @@
 | M4: planner conflict detection | Done | Added source partitioning, version-spec conflict checks, origin diagnostics, apt/distro-vs-pip shadow warnings. |
 | M5: installer + lock | Done | Added installer, dry-run command output, apt installed check, uv/pip install fallback, lock writer, `petal sync --dry-run`. |
 | M6: status/drift + frozen | Done | Added lock loader, status report, apt/pip/distro checks, manifest hash drift, exit code 2, frozen lock enforcement. |
-| M7: colcon verb | Not started | Optional after core. |
+| M7: colcon verb | Done | Added `colcon deps` verb wrapper for `sync` and `status`, with entry point and tests. |
 
 ## Implemented Files
 
@@ -58,6 +60,8 @@
 - `petal/planner.py`
 - `petal/installer.py`
 - `petal/status.py`
+- `petal/colcon_ext/__init__.py`
+- `petal/colcon_ext/verb.py`
 - `tests/test_cli.py`
 - `tests/test_discovery.py`
 - `tests/test_env.py`
@@ -65,14 +69,16 @@
 - `tests/test_planner.py`
 - `tests/test_installer.py`
 - `tests/test_status.py`
+- `tests/test_colcon_verb.py`
 - `tests/fixtures/cmd_output/`
 - `tests/fixtures/ws_discovery/`
 - `tests/fixtures/ws_setup_py/`
 
 ## Next Step
 
-Implement M7 colcon verb:
+Next hardening work:
 
-- `petal/colcon_ext/verb.py`
-- entry point group `colcon_core.verb`
-- tests without requiring real colcon when absent
+- improve lock format with hashes for uv output
+- add `petal add` and `petal remove`
+- add integration test in ROS Docker image
+- improve resolver version pinning for apt/rosdep

@@ -19,5 +19,8 @@ test = ["pytest>=8"]
 [project.scripts]
 petal = "petal.cli:main"
 
+[project.entry-points."colcon_core.verb"]
+deps = "petal.colcon_ext.verb:DepsVerb"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
