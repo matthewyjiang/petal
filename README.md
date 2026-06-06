@@ -2,9 +2,7 @@
 
 Workspace-scoped Python dependency manager for ROS2.
 
-Petal discovers Python dependencies in a ROS2 workspace, resolves apt-first, falls back to PyPI when needed, installs pip packages into `.petal/venv`, and writes `petal.lock`.
-
-Petal is dependency management, not node isolation. ROS2 still runs in one shared Python interpreter view, so petal venvs are created with `--system-site-packages`.
+Petal discovers Python dependencies in a ROS2 workspace, resolves apt-first, falls back to PyPI when needed, installs into workspace-local state, and writes `petal.lock`.
 
 ## Philosophy
 
