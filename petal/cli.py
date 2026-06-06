@@ -165,19 +165,32 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
 
 def _cmd_install_agent_skill(args: argparse.Namespace) -> int:
-    target_root = Path(args.target).expanduser() if args.target else Path.home() / ".agents" / "skills"
+    target_root = (
+        Path(args.target).expanduser()
+        if args.target
+        else Path.home() / ".agents" / "skills"
+    )
     target = target_root / "petal-cli"
-    if target.exists():
-        if not args.force:
-            print(f"agent skill already installed: {target}")
-            print("use --force to replace it")
-            return 0
-        shutil.rmtree(target)
 
-    target_root.mkdir(parents=True, exist_ok=True)
-    source = resources.files("petal.assets.skills").joinpath("petal-cli")
-    with resources.as_file(source) as source_path:
-        shutil.copytree(source_path, target)
+    try:
+        if target.exists() or target.is_symlink():
+            if not args.force:
+                print(f"agent skill already installed: {target}")
+                print("use --force to replace it")
+                return 0
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+
+        target_root.mkdir(parents=True, exist_ok=True)
+        source = resources.files("petal.assets.skills").joinpath("petal-cli")
+        with resources.as_file(source) as source_path:
+            shutil.copytree(source_path, target)
+    except OSError as exc:
+        print(f"petal: failed to install agent skill: {exc}", file=sys.stderr)
+        return 1
+
     print(f"installed petal-cli agent skill to {target}")
     return 0
 
