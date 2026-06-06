@@ -77,19 +77,21 @@ petal add cv_bridge
 
 ## Commands
 
-```bash
-petal init              # create petal.toml and .petal/venv
-petal add <name> [spec] # add dependency and sync it
-petal remove <name>     # remove dependency from manifest and venv
-petal sync              # resolve, install, write petal.lock
-petal sync --yes        # skip install prompt
-petal sync --no         # show plan, install nothing
-petal sync --dry-run    # show commands, install nothing
-petal sync --frozen     # enforce petal.lock
-petal status            # report drift; exits 2 on drift/missing/change
-petal activate          # print shell snippet for ROS + venv activation
-petal clean             # remove .petal/venv
-```
+| Command | Description |
+| --- | --- |
+| `petal init` | Create `petal.toml` and `.petal/venv`. |
+| `petal add <name> [spec]` | Add a dependency and sync it. |
+| `petal add <name> --apt` | Force a dependency to resolve through apt. |
+| `petal add <name> --pip` | Force a dependency to resolve through PyPI. |
+| `petal remove <name>` | Remove a dependency from the manifest and venv. |
+| `petal sync` | Resolve, install, and write `petal.lock`. |
+| `petal sync --yes` | Skip the install prompt. |
+| `petal sync --no` | Show the plan without installing. |
+| `petal sync --dry-run` | Show commands without installing. |
+| `petal sync --frozen` | Enforce `petal.lock`. |
+| `petal status` | Report drift; exits 2 on drift, missing installs, or manifest changes. |
+| `petal activate` | Print the ROS + venv activation snippet. |
+| `petal clean` | Remove `.petal/venv`. |
 
 `petal sync` and `petal add` print the resolved source for each dependency before installing. If `petal add` is declined, cancelled, or run with `--dry-run`, `petal.toml` stays unchanged.
 
