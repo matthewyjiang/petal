@@ -187,6 +187,9 @@ def _cmd_install_agent_skill(args: argparse.Namespace) -> int:
         dist = metadata.distribution("petal-ros")
         source = Path(dist.locate_file("skills/petal-cli"))
         shutil.copytree(source, target)
+    except metadata.PackageNotFoundError as exc:
+        print(f"petal: failed to install agent skill (petal-ros not installed): {exc}", file=sys.stderr)
+        return 1
     except OSError as exc:
         print(f"petal: failed to install agent skill: {exc}", file=sys.stderr)
         return 1
