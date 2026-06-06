@@ -7,7 +7,7 @@ description: Use when working with Petal, the workspace-scoped Python dependency
 
 Petal is a workspace-scoped Python dependency manager for ROS2. It discovers Python dependencies in a ROS2 workspace, resolves apt-first, falls back to PyPI when needed, installs pip packages into `.petal/venv`, and writes `petal.lock`.
 
-Use this skill when the user asks how to install, configure, run, troubleshoot, or automate `petal` or `colcon deps`.
+Use this skill whenever you need to work with Petal or `colcon deps`, including installing, configuring, running, troubleshooting, or automating the CLI.
 
 ## Key Constraints
 
