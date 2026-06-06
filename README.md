@@ -6,6 +6,18 @@ Petal discovers Python dependencies in a ROS2 workspace, resolves apt-first, fal
 
 Petal is dependency management, not node isolation. ROS2 still runs in one shared Python interpreter view, so petal venvs are created with `--system-site-packages`.
 
+## Philosophy
+
+ROS 2 and Ubuntu LTS are intentionally paired: Ubuntu freezes package versions, and ROS builds against them. Packages like `python3-numpy`, `python3-opencv`, and `python3-transforms3d` exist so the ROS stack shares a known, coherent set of versions. Replacing them with pip-installed copies often creates a broken ROS environment, not a better one.
+
+Petal works with this model instead of fighting it:
+
+- Prefer apt for anything available as a `python3-*` distro package. Petal records these in `petal.toml` so installs are reproducible, but it does not try to replace what ROS was built against.
+- Use an isolated `.petal/venv` for everything else: research packages, custom libraries, and PyPI-only tools. The venv uses `--system-site-packages` so it can see apt-installed ROS Python packages without duplicating them.
+- Never pip into system Python. That is what causes dependency hell; Petal makes it unnecessary.
+
+The result is a workspace that stays compatible with ROS while still letting you use the PyPI packages your project needs, cleanly and reproducibly.
+
 ## Install
 
 ```bash
