@@ -39,3 +39,4 @@ class Manifest:
 class Lock:
     manifest_hash: str
     resolved: list[ResolvedDep]
+    dependency_hash: str = ""

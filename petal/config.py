@@ -82,6 +82,16 @@ def manifest_hash(path: Path) -> str:
     return f"sha256:{digest}"
 
 
+def dependency_hash(deps: list[Dep]) -> str:
+    lines = []
+    for dep in sorted(deps, key=lambda item: (_dep_key(item.name), item.version_spec, item.source_hint.value if item.source_hint else "")):
+        source = dep.source_hint.value if dep.source_hint else ""
+        origins = ",".join(sorted(dep.origin_packages))
+        lines.append(f"{_dep_key(dep.name)}\t{dep.version_spec}\t{source}\t{origins}")
+    digest = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+    return f"sha256:{digest}"
+
+
 def _manifest_lines(path: Path) -> list[str]:
     if not path.exists():
         return []
@@ -207,4 +217,8 @@ def load_lock(path: Path) -> Lock:
                 apt_pkg=str(item.get("apt_pkg", "")),
             )
         )
-    return Lock(manifest_hash=str(data.get("manifest_hash", "")), resolved=resolved)
+    return Lock(
+        manifest_hash=str(data.get("manifest_hash", "")),
+        resolved=resolved,
+        dependency_hash=str(data.get("dependency_hash", "")),
+    )

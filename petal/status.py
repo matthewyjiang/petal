@@ -59,11 +59,28 @@ def check_status(workspace_root: Path, venv: Path, runner: Runner = default_runn
 
 
 def print_report(report: StatusReport) -> None:
-    print("in sync: " + (", ".join(report.in_sync) if report.in_sync else "none"))
-    print("drifted: " + (", ".join(report.drifted) if report.drifted else "none"))
-    print("missing: " + (", ".join(report.missing) if report.missing else "none"))
+    parts = [f"{len(report.in_sync)} synced"]
+    if report.drifted:
+        parts.append(f"{len(report.drifted)} drifted")
+    if report.missing:
+        parts.append(f"{len(report.missing)} missing")
     if report.manifest_changed:
-        print("manifest changed since lock; run `petal sync`")
+        parts.append("manifest changed")
+    print("  ·  ".join(parts))
+
+    if report.ok:
+        return
+
+    if report.manifest_changed:
+        print("  run `petal sync` to update the lock")
+    if report.drifted:
+        print("  drifted:")
+        for item in report.drifted:
+            print(f"    {item}")
+    if report.missing:
+        print("  missing:")
+        for item in report.missing:
+            print(f"    {item}")
 
 
 def _bucket(report: StatusReport, name: str, actual: str, expected: str) -> None:

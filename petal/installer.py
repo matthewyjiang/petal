@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from petal.config import load_lock, manifest_hash
+from petal.config import dependency_hash, load_lock, manifest_hash
 from petal.models import ResolvedDep, Source
 from petal.planner import Plan
 from petal.resolve.base import (
@@ -49,18 +50,28 @@ def execute(
     pip_reqs = [_pip_requirement(item) for item in plan.pip]
     distro_names = [item.dep.name for item in plan.distro]
 
-    _print_plan(plan, venv)
-
     if dry_run:
+        _print_plan(plan, venv)
         _print_dry_run(apt_pkgs, pip_reqs, venv)
         return False
 
-    if distro_names:
-        print("DISTRO: already provided " + ", ".join(distro_names))
-
     missing_apt = [pkg for pkg in apt_pkgs if not _apt_installed(pkg, runner)]
-    will_install = bool(missing_apt or pip_reqs)
-    if will_install and not _confirm_install(assume_yes=assume_yes, assume_no=assume_no):
+    missing_pip = _missing_pip(plan.pip, venv, runner)
+    pip_reqs_to_install = [_pip_requirement(item) for item in missing_pip]
+    will_install = bool(missing_apt or pip_reqs_to_install)
+
+    if not will_install:
+        if distro_names or apt_pkgs or pip_reqs:
+            print("petal: all dependencies already satisfied")
+        else:
+            print("petal: no dependencies to install")
+        if workspace_root and manifest_path:
+            _write_lock_if_changed(workspace_root / "petal.lock", manifest_path, [*plan.distro, *plan.apt, *plan.pip])
+        return True
+
+    _print_changes(plan, missing_apt, missing_pip, venv)
+
+    if not _confirm_install(assume_yes=assume_yes, assume_no=assume_no):
         print("petal: install cancelled")
         return False
 
@@ -79,11 +90,11 @@ def execute(
     elif apt_pkgs:
         print("APT: already installed " + ", ".join(apt_pkgs))
 
-    if pip_reqs:
-        print("PIP: installing " + ", ".join(pip_reqs))
-        proc = install_runner(["uv", "pip", "install", "--python", str(venv_python(venv)), *pip_reqs])
+    if pip_reqs_to_install:
+        print("PIP: installing " + ", ".join(pip_reqs_to_install))
+        proc = install_runner(["uv", "pip", "install", "--python", str(venv_python(venv)), *pip_reqs_to_install])
         if proc.returncode != 0:
-            pip_proc = install_runner([str(venv_python(venv)), "-m", "pip", "install", *pip_reqs])
+            pip_proc = install_runner([str(venv_python(venv)), "-m", "pip", "install", *pip_reqs_to_install])
             if pip_proc.returncode != 0:
                 raise InstallerError(pip_proc.stderr or proc.stderr or "pip install failed")
 
@@ -100,12 +111,47 @@ def execute(
 def write_lock(lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]) -> None:
     lines = [
         f'manifest_hash = "{manifest_hash(manifest_path)}"',
+        f'dependency_hash = "{dependency_hash([item.dep for item in resolved])}"',
         f'generated_at = "{datetime.now(timezone.utc).isoformat()}"',
         "",
     ]
     for item in resolved:
         lines.extend(_lock_entry(item))
     lock_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _write_lock_if_changed(lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]) -> None:
+    if _lock_matches(lock_path, manifest_path, resolved):
+        print("lock: unchanged")
+        return
+    write_lock(lock_path, manifest_path, resolved)
+    print(f"lock: wrote {lock_path}")
+
+
+def _lock_matches(lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]) -> bool:
+    if not lock_path.exists():
+        return False
+    try:
+        lock = load_lock(lock_path)
+    except Exception:
+        return False
+    if lock.manifest_hash != manifest_hash(manifest_path):
+        return False
+    if lock.dependency_hash != dependency_hash([item.dep for item in resolved]):
+        return False
+    locked = {_frozen_key(item): item for item in lock.resolved}
+    planned = {_frozen_key(item): item for item in resolved}
+    if locked.keys() != planned.keys():
+        return False
+    for key, item in planned.items():
+        locked_item = locked[key]
+        if item.chosen_source != locked_item.chosen_source:
+            return False
+        if item.apt_pkg != locked_item.apt_pkg:
+            return False
+        if item.resolved_version != locked_item.resolved_version:
+            return False
+    return True
 
 
 def uninstall(
@@ -146,6 +192,32 @@ def _pip_requirement(item: ResolvedDep) -> str:
     return dep_requirement(item.dep)
 
 
+def _missing_pip(items: list[ResolvedDep], venv: Path, runner: Runner) -> list[ResolvedDep]:
+    if not items:
+        return []
+    installed = _pip_versions(venv, runner)
+    missing: list[ResolvedDep] = []
+    for item in items:
+        key = item.dep.name.lower().replace("_", "-")
+        actual = installed.get(key)
+        if not actual or (item.resolved_version and actual != item.resolved_version):
+            missing.append(item)
+    return missing
+
+
+def _pip_versions(venv: Path, runner: Runner) -> dict[str, str]:
+    proc = runner(["uv", "pip", "list", "--python", str(venv_python(venv)), "--format", "json"])
+    if proc.returncode != 0:
+        proc = runner([str(venv_python(venv)), "-m", "pip", "list", "--format", "json"])
+    if proc.returncode != 0:
+        return {}
+    try:
+        data = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError:
+        return {}
+    return {str(item["name"]).lower().replace("_", "-"): str(item["version"]) for item in data}
+
+
 def _print_plan(plan: Plan, venv: Path) -> None:
     items = [*plan.distro, *plan.apt, *plan.pip]
     if not items:
@@ -164,6 +236,24 @@ def _print_plan(plan: Plan, venv: Path) -> None:
             f"  {item.dep.name:<24} pip      "
             f"{_pip_requirement(item)} -> {venv_python(venv)}"
         )
+
+
+def _print_changes(plan: Plan, missing_apt: list[str], missing_pip: list[ResolvedDep], venv: Path) -> None:
+    change_count = len(missing_apt) + len(missing_pip)
+    noun = "change" if change_count == 1 else "changes"
+    satisfied = len(plan.distro) + (len(plan.apt) - len(missing_apt)) + (len(plan.pip) - len(missing_pip))
+    print(f"{change_count} {noun} to apply  ·  {satisfied} already satisfied")
+    if missing_apt:
+        print("  apt:")
+        missing_apt_set = set(missing_apt)
+        for item in plan.apt:
+            if item.apt_pkg in missing_apt_set:
+                version = f" {item.resolved_version}" if item.resolved_version else ""
+                print(f"    {item.dep.name} -> {item.apt_pkg or item.dep.name}{version}")
+    if missing_pip:
+        print("  pip:")
+        for item in missing_pip:
+            print(f"    {item.dep.name} -> {_pip_requirement(item)}")
 
 
 def _confirm_install(*, assume_yes: bool, assume_no: bool) -> bool:

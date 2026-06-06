@@ -41,6 +41,8 @@ def test_execute_installs_missing_apt_and_pip_then_writes_lock(tmp_path: Path, c
         calls.append(cmd)
         if cmd[:2] == ["dpkg-query", "-W"]:
             return completed(cmd, returncode=1)
+        if cmd[:3] == ["uv", "pip", "list"]:
+            return completed(cmd, "[]")
         return completed(cmd)
 
     assert execute(
@@ -79,7 +81,7 @@ def test_execute_skips_installed_apt(tmp_path: Path, capsys) -> None:  # type: i
 
     assert execute(Plan(apt=[apt_dep()]), tmp_path / "venv", runner=runner) is True
     assert ["sudo", "apt-get", "install", "-y", "python3-numpy"] not in calls
-    assert "APT: already installed python3-numpy" in capsys.readouterr().out
+    assert "petal: all dependencies already satisfied" in capsys.readouterr().out
 
 
 def test_execute_prints_noop_for_empty_plan(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -90,7 +92,7 @@ def test_execute_prints_noop_for_empty_plan(tmp_path: Path, capsys) -> None:  # 
 def test_execute_prints_distro_noop(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     dep = ResolvedDep(Dep("rclpy"), Source.DISTRO, resolved_version="3.3.7")
     assert execute(Plan(distro=[dep]), tmp_path / "venv") is True
-    assert "DISTRO: already provided rclpy" in capsys.readouterr().out
+    assert "petal: all dependencies already satisfied" in capsys.readouterr().out
 
 
 def test_write_lock_serializes_resolved_deps(tmp_path: Path) -> None:
@@ -128,6 +130,8 @@ def test_frozen_allows_matching_lock(tmp_path: Path) -> None:
 
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
         calls.append(cmd)
+        if cmd[:3] == ["uv", "pip", "list"]:
+            return completed(cmd, "[]")
         return completed(cmd)
 
     assert execute(
@@ -139,7 +143,10 @@ def test_frozen_allows_matching_lock(tmp_path: Path) -> None:
         install_runner=runner,
         assume_yes=True,
     ) is True
-    assert calls == [["uv", "pip", "install", "--python", str(tmp_path / "venv" / "bin" / "python"), "rich==13.7.0"]]
+    assert calls == [
+        ["uv", "pip", "list", "--python", str(tmp_path / "venv" / "bin" / "python"), "--format", "json"],
+        ["uv", "pip", "install", "--python", str(tmp_path / "venv" / "bin" / "python"), "rich==13.7.0"],
+    ]
 
 
 def test_execute_no_prompt_skips_install(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -148,6 +155,8 @@ def test_execute_no_prompt_skips_install(tmp_path: Path, capsys) -> None:  # typ
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
         if cmd[:2] == ["dpkg-query", "-W"]:
             return completed(cmd, returncode=1)
+        if cmd[:3] == ["uv", "pip", "list"]:
+            return completed(cmd, "[]")
         calls.append(cmd)
         return completed(cmd)
 
@@ -161,6 +170,69 @@ def test_execute_no_prompt_skips_install(tmp_path: Path, capsys) -> None:  # typ
 
     assert calls == []
     assert "install cancelled" in capsys.readouterr().out
+
+
+def test_execute_skips_installed_pip_without_prompt(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    calls: list[list[str]] = []
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(cmd)
+        if cmd[:3] == ["uv", "pip", "list"]:
+            return completed(cmd, '[{"name":"rich","version":"13.7.0"}]')
+        return completed(cmd)
+
+    assert execute(Plan(pip=[pip_dep()]), tmp_path / "venv", runner=runner, install_runner=runner) is True
+
+    assert ["uv", "pip", "install", "--python", str(tmp_path / "venv" / "bin" / "python"), "rich==13.7.0"] not in calls
+    assert "petal: all dependencies already satisfied" in capsys.readouterr().out
+
+
+def test_execute_noop_leaves_matching_lock_unchanged(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text("[deps]\n", encoding="utf-8")
+    dep = pip_dep()
+    write_lock(tmp_path / "petal.lock", manifest, [dep])
+    before = (tmp_path / "petal.lock").read_text(encoding="utf-8")
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[:3] == ["uv", "pip", "list"]:
+            return completed(cmd, '[{"name":"rich","version":"13.7.0"}]')
+        return completed(cmd)
+
+    assert execute(
+        Plan(pip=[dep]),
+        tmp_path / "venv",
+        workspace_root=tmp_path,
+        manifest_path=manifest,
+        runner=runner,
+        install_runner=runner,
+    ) is True
+
+    assert (tmp_path / "petal.lock").read_text(encoding="utf-8") == before
+    assert "lock: unchanged" in capsys.readouterr().out
+
+
+def test_execute_noop_writes_missing_lock(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text("[deps]\n", encoding="utf-8")
+    dep = pip_dep()
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[:3] == ["uv", "pip", "list"]:
+            return completed(cmd, '[{"name":"rich","version":"13.7.0"}]')
+        return completed(cmd)
+
+    assert execute(
+        Plan(pip=[dep]),
+        tmp_path / "venv",
+        workspace_root=tmp_path,
+        manifest_path=manifest,
+        runner=runner,
+        install_runner=runner,
+    ) is True
+
+    assert (tmp_path / "petal.lock").exists()
+    assert "lock: wrote" in capsys.readouterr().out
 
 
 def test_execute_non_tty_requires_yes(tmp_path: Path) -> None:

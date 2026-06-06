@@ -102,8 +102,19 @@ def test_status_uses_known_import_name_for_distro_dep(tmp_path: Path) -> None:
     assert report.in_sync == ["pyyaml"]
 
 
-def test_print_report(capsys) -> None:  # type: ignore[no-untyped-def]
+def test_print_report_ok_is_concise(capsys) -> None:  # type: ignore[no-untyped-def]
+    ws_report = check_status(Path("/does/not/exist"), Path("/venv"), lambda cmd, **kwargs: completed(cmd))
+    ws_report.missing.clear()
+    ws_report.in_sync.extend(["numpy", "rich"])
+
+    print_report(ws_report)
+
+    assert capsys.readouterr().out == "2 synced\n"
+
+
+def test_print_report_issues_are_bulleted(capsys) -> None:  # type: ignore[no-untyped-def]
     ws_report = check_status(Path("/does/not/exist"), Path("/venv"), lambda cmd, **kwargs: completed(cmd))
     print_report(ws_report)
     out = capsys.readouterr().out
-    assert "missing: petal.lock" in out
+    assert "0 synced  ·  1 missing" in out
+    assert "  missing:\n    petal.lock" in out
