@@ -29,15 +29,21 @@ For the colcon verb:
 uv tool install "petal-ros[colcon]"
 ```
 
-Local development install:
+Local development install with uv, no system `pip` required:
 
 ```bash
 git clone https://github.com/matthewyjiang/petal.git
 cd petal
-python3 -m pip install -e .
+uv tool install --editable .
 ```
 
-Requirements: Python 3.10+, ROS2 under `/opt/ros/<distro>`, `rosdep`, apt tools, and preferably `uv`.
+For one-off local runs without installing the `petal` command:
+
+```bash
+uv run petal --help
+```
+
+Requirements: Python 3.10+, ROS2 under `/opt/ros/<distro>`, `rosdep`, apt tools, and `uv`.
 
 ## Quickstart
 
