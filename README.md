@@ -12,9 +12,15 @@ Petal works with this model instead of fighting it:
 
 - Prefer apt for anything available as a `python3-*` distro package. Petal records these in `petal.toml` so installs are reproducible, but it does not try to replace what ROS was built against.
 - Use an isolated `.petal/venv` for everything else: research packages, custom libraries, and PyPI-only tools. The venv uses `--system-site-packages` so it can see apt-installed ROS Python packages without duplicating them.
-- Never pip into system Python. That is what causes dependency hell; Petal makes it unnecessary.
+- Never pip into system Python. That is what causes dependency conflicts; Petal makes it unnecessary.
 
 The result is a workspace that stays compatible with ROS while still letting you use the PyPI packages your project needs, cleanly and reproducibly.
+
+## Docker
+
+Docker is great for CI, demos, deployment images, and reproducing a full OS environment. Petal is for the common case where you are developing directly on a ROS machine and want dependencies to stay aligned with that machine's Ubuntu/ROS install.
+
+Use Docker for OS-level isolation. Use Petal for workspace-level dependency management without pip installs into system Python.
 
 ## Install
 
