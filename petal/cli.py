@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from importlib import metadata
 from pathlib import Path
 
 from petal import env, preflight
-from petal.config import add_manifest_dep, find_workspace_root, load_manifest, remove_manifest_dep, write_manifest
+from petal.config import add_manifest_dep, find_workspace_root, load_lock, load_manifest, manifest_hash, remove_manifest_dep, write_manifest
 from petal.discover.workspace import discover_workspace
 from petal.installer import InstallerError, execute, uninstall, write_lock
 from petal.planner import PlannerConflict, build_plan
@@ -47,6 +49,16 @@ def _cmd_clean(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_deps(manager: ResolutionManager, deps: list[Dep]) -> list:
+    if hasattr(manager, "preload"):
+        manager.preload()
+    workers = min(8, max(1, len(deps), os.cpu_count() or 1))
+    if workers == 1:
+        return [item for dep in deps if (item := manager.resolve(dep))]
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return [item for item in pool.map(manager.resolve, deps) if item]
+
+
 def _cmd_sync(args: argparse.Namespace) -> int:
     preflight.assert_ok(preflight.check())
     workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
@@ -57,9 +69,13 @@ def _cmd_sync(args: argparse.Namespace) -> int:
 
     discovered = discover_workspace(workspace)
     deps = [*(manifest.deps if manifest else []), *discovered.deps]
-    manager = ResolutionManager(ros_distro=distro, venv=venv)
-    resolved = [item for dep in deps if (item := manager.resolve(dep))]
-    plan = build_plan(resolved)
+    lock_path = workspace / "petal.lock"
+    if not args.dry_run and lock_path.exists() and manifest_path.exists() and load_lock(lock_path).manifest_hash == manifest_hash(manifest_path):
+        plan = build_plan(load_lock(lock_path).resolved)
+    else:
+        manager = ResolutionManager(ros_distro=distro, venv=venv)
+        resolved = _resolve_deps(manager, deps)
+        plan = build_plan(resolved)
     execute(
         plan,
         venv,

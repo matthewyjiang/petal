@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from petal import cli, env, preflight
+from petal.installer import write_lock
 from petal.models import Dep, ResolvedDep, Source
 from petal.planner import Plan
 
@@ -61,6 +62,36 @@ def test_sync_dry_run_orchestrates_resolution(monkeypatch, tmp_path: Path) -> No
     assert cli.main(["sync", "--workspace", str(tmp_path), "--dry-run"]) == 0
     assert executed["venv"] == venv
     assert executed["dry_run"] is True
+    assert executed["plan"].pip[0].resolved_version == "13.7.0"
+
+
+def test_sync_uses_current_lock_without_resolving(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text(
+        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\nrich = \">=13\"\n",
+        encoding="utf-8",
+    )
+    venv = tmp_path / ".petal" / "venv"
+    write_lock(tmp_path / "petal.lock", manifest, [ResolvedDep(Dep("rich"), Source.PIP, resolved_version="13.7.0")])
+    monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
+    monkeypatch.setattr(cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[]))
+
+    class FakeManager:
+        def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("sync should use the current lock")
+
+    monkeypatch.setattr(cli, "ResolutionManager", FakeManager)
+
+    executed = {}
+
+    def fake_execute(plan, got_venv, **kwargs):  # type: ignore[no-untyped-def]
+        executed["plan"] = plan
+        return True
+
+    monkeypatch.setattr(cli, "execute", fake_execute)
+
+    assert cli.main(["sync", "--workspace", str(tmp_path)]) == 0
     assert executed["plan"].pip[0].resolved_version == "13.7.0"
 
 

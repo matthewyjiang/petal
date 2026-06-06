@@ -25,6 +25,9 @@ class ResolutionManager:
         self.apt = AptResolver(runner)
         self.pip = PipResolver(venv, runner)
 
+    def preload(self) -> None:
+        self.distro._modules()
+
     def resolve(self, dep: Dep) -> ResolvedDep | None:
         key = (dep.name, dep.version_spec, dep.source_hint)
         if key in self.cache:
