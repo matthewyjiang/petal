@@ -95,21 +95,15 @@ petal clean             # remove .petal/venv
 
 ## Manifest
 
-```toml
-[workspace]
-ros_distro = "humble"
-python_version = "3.10"
+Petal records workspace dependencies in `petal.toml`:
 
+```toml
 [deps]
 numpy = ">=1.24"
-huggingface = ">=0.0.1"
-some-system-lib = { apt = "libfoo-dev" }
-
-[overrides]
-ml_collections = { pip = "ml-collections" }
+ultralytics = "*"
 ```
 
-Resolution order: ROS/system modules, `rosdep`, apt (`python3-<name>`), then PyPI.
+Resolution order: ROS/system modules, `rosdep`, apt (`python3-<name>`), then PyPI. Use `petal add --apt` or `petal add --pip` when you need to force a source.
 
 ## Colcon Verb
 
