@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+from importlib import metadata
 from pathlib import Path
 
 from petal import env, preflight
@@ -163,6 +164,40 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0 if report.ok else 2
 
 
+def _cmd_install_agent_skill(args: argparse.Namespace) -> int:
+    target_root = (
+        Path(args.target).expanduser()
+        if args.target
+        else Path.home() / ".agents" / "skills"
+    )
+    target = target_root / "petal-cli"
+
+    try:
+        if target.exists() or target.is_symlink():
+            if not args.force:
+                print(f"agent skill already installed: {target}")
+                print("use --force to replace it")
+                return 0
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+
+        target_root.mkdir(parents=True, exist_ok=True)
+        dist = metadata.distribution("petal-ros")
+        source = Path(dist.locate_file("skills/petal-cli"))
+        shutil.copytree(source, target)
+    except metadata.PackageNotFoundError as exc:
+        print(f"petal: failed to install agent skill (petal-ros not installed): {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"petal: failed to install agent skill: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"installed petal-cli agent skill to {target}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="petal")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -219,6 +254,11 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="report manifest/lock/install drift")
     status.add_argument("--workspace")
     status.set_defaults(func=_cmd_status)
+
+    skill = sub.add_parser("install-agent-skill", help="install the Petal CLI agent skill")
+    skill.add_argument("--target", help="skills directory (default: ~/.agents/skills)")
+    skill.add_argument("--force", action="store_true", help="replace an existing petal-cli skill")
+    skill.set_defaults(func=_cmd_install_agent_skill)
     return parser
 
 

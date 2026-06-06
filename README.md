@@ -116,6 +116,16 @@ colcon deps sync --workspace /path/to/ws  # explicit workspace path
 
 `colcon deps` is a thin wrapper around `petal sync` / `petal status` and honours the same flags.
 
+## Agent Skill
+
+This repo includes an installable agent skill with Petal CLI usage guidance:
+
+```bash
+petal install-agent-skill
+```
+
+After installing, coding agents that support `~/.agents/skills` can load the `petal-cli` skill when users ask about Petal.
+
 ## Development
 
 ```bash
