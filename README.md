@@ -50,7 +50,6 @@ From a ROS2 workspace root:
 
 ```bash
 petal init
-petal add numpy
 petal sync
 petal status
 source <(petal activate)
