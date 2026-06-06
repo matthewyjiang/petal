@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -52,11 +51,20 @@ def _cmd_clean(args: argparse.Namespace) -> int:
 def _resolve_deps(manager: ResolutionManager, deps: list[Dep]) -> list:
     if hasattr(manager, "preload"):
         manager.preload()
-    workers = min(8, max(1, len(deps), os.cpu_count() or 1))
+    workers = max(1, min(8, len(deps)))
     if workers == 1:
         return [item for dep in deps if (item := manager.resolve(dep))]
     with ThreadPoolExecutor(max_workers=workers) as pool:
         return [item for item in pool.map(manager.resolve, deps) if item]
+
+
+def _load_lock_or_none(lock_path: Path):
+    if not lock_path.exists():
+        return None
+    try:
+        return load_lock(lock_path)
+    except Exception:
+        return None
 
 
 def _cmd_sync(args: argparse.Namespace) -> int:
@@ -70,7 +78,7 @@ def _cmd_sync(args: argparse.Namespace) -> int:
     discovered = discover_workspace(workspace)
     deps = [*(manifest.deps if manifest else []), *discovered.deps]
     lock_path = workspace / "petal.lock"
-    lock = load_lock(lock_path) if lock_path.exists() else None
+    lock = _load_lock_or_none(lock_path)
     if (
         not args.dry_run
         and lock

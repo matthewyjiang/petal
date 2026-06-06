@@ -143,7 +143,10 @@ def test_frozen_allows_matching_lock(tmp_path: Path) -> None:
         install_runner=runner,
         assume_yes=True,
     ) is True
-    assert ["uv", "pip", "install", "--python", str(tmp_path / "venv" / "bin" / "python"), "rich==13.7.0"] in calls
+    assert calls == [
+        ["uv", "pip", "list", "--python", str(tmp_path / "venv" / "bin" / "python"), "--format", "json"],
+        ["uv", "pip", "install", "--python", str(tmp_path / "venv" / "bin" / "python"), "rich==13.7.0"],
+    ]
 
 
 def test_execute_no_prompt_skips_install(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
