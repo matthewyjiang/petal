@@ -69,6 +69,12 @@ PyPI package:
 petal add huggingface
 ```
 
+Version spec:
+
+```bash
+petal add ultralytics ">=8,<9"
+```
+
 Rosdep-resolved ROS package:
 
 ```bash
@@ -80,20 +86,16 @@ petal add cv_bridge
 | Command | Description |
 | --- | --- |
 | `petal init` | Create `petal.toml` and `.petal/venv`. |
-| `petal add <name> [spec]` | Add a dependency and sync it. |
-| `petal add <name> --apt` | Force a dependency to resolve through apt. |
-| `petal add <name> --pip` | Force a dependency to resolve through PyPI. |
-| `petal remove <name>` | Remove a dependency from the manifest and venv. |
+| `petal add <name> [spec]` | Add a dependency and sync it. Use `--apt` or `--pip` to force a source. |
+| `petal remove <name>` | Remove a dependency. |
 | `petal sync` | Resolve, install, and write `petal.lock`. |
-| `petal sync --yes` | Skip the install prompt. |
-| `petal sync --no` | Show the plan without installing. |
-| `petal sync --dry-run` | Show commands without installing. |
-| `petal sync --frozen` | Enforce `petal.lock`. |
-| `petal status` | Report drift; exits 2 on drift, missing installs, or manifest changes. |
+| `petal status` | Report drift; exits 2 when the workspace is out of sync. |
 | `petal activate` | Print the ROS + venv activation snippet. |
 | `petal clean` | Remove `.petal/venv`. |
 
-`petal sync` and `petal add` print the resolved source for each dependency before installing. If `petal add` is declined, cancelled, or run with `--dry-run`, `petal.toml` stays unchanged.
+Common sync flags: `--yes`, `--no`, `--dry-run`, `--frozen`.
+
+`petal sync` and `petal add` print the resolved source for each dependency before installing.
 
 ## Manifest
 
