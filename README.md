@@ -16,7 +16,7 @@ Petal works with this model instead of fighting it:
 
 The result is a workspace that stays compatible with ROS while still letting you use the PyPI packages your project needs, cleanly and reproducibly.
 
-## Docker
+### Docker
 
 Docker is great for CI, demos, deployment images, and reproducing a full OS environment. Petal is for the common case where you are developing directly on a ROS machine and want dependencies to stay aligned with that machine's Ubuntu/ROS install.
 
