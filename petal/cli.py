@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
-from importlib import resources
+from importlib import metadata
 from pathlib import Path
 
 from petal import env, preflight
@@ -184,9 +184,9 @@ def _cmd_install_agent_skill(args: argparse.Namespace) -> int:
                 target.unlink()
 
         target_root.mkdir(parents=True, exist_ok=True)
-        source = resources.files("petal.assets.skills").joinpath("petal-cli")
-        with resources.as_file(source) as source_path:
-            shutil.copytree(source_path, target)
+        dist = metadata.distribution("petal-ros")
+        source = Path(dist.locate_file("skills/petal-cli"))
+        shutil.copytree(source, target)
     except OSError as exc:
         print(f"petal: failed to install agent skill: {exc}", file=sys.stderr)
         return 1
