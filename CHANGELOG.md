@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/matthewyjiang/petal/compare/v0.2.0...v0.2.1) (2026-06-06)
+
+
+### Bug Fixes
+
+* dispatch publish after release ([#11](https://github.com/matthewyjiang/petal/issues/11)) ([c63b1c3](https://github.com/matthewyjiang/petal/commit/c63b1c3696423419d22a009ec467bda43265c9c5))
+
 ## [0.2.0](https://github.com/matthewyjiang/petal/compare/v0.1.2...v0.2.0) (2026-06-06)
 
 
