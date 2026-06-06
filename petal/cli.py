@@ -9,7 +9,7 @@ from importlib import metadata
 from pathlib import Path
 
 from petal import env, preflight
-from petal.config import add_manifest_dep, find_workspace_root, load_lock, load_manifest, manifest_hash, remove_manifest_dep, write_manifest
+from petal.config import add_manifest_dep, dependency_hash, find_workspace_root, load_lock, load_manifest, manifest_hash, remove_manifest_dep, write_manifest
 from petal.discover.workspace import discover_workspace
 from petal.installer import InstallerError, execute, uninstall, write_lock
 from petal.planner import PlannerConflict, build_plan
@@ -70,8 +70,15 @@ def _cmd_sync(args: argparse.Namespace) -> int:
     discovered = discover_workspace(workspace)
     deps = [*(manifest.deps if manifest else []), *discovered.deps]
     lock_path = workspace / "petal.lock"
-    if not args.dry_run and lock_path.exists() and manifest_path.exists() and load_lock(lock_path).manifest_hash == manifest_hash(manifest_path):
-        plan = build_plan(load_lock(lock_path).resolved)
+    lock = load_lock(lock_path) if lock_path.exists() else None
+    if (
+        not args.dry_run
+        and lock
+        and manifest_path.exists()
+        and lock.manifest_hash == manifest_hash(manifest_path)
+        and lock.dependency_hash == dependency_hash(deps)
+    ):
+        plan = build_plan(lock.resolved)
     else:
         manager = ResolutionManager(ros_distro=distro, venv=venv)
         resolved = _resolve_deps(manager, deps)

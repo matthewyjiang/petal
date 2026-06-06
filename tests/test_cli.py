@@ -73,7 +73,7 @@ def test_sync_uses_current_lock_without_resolving(monkeypatch, tmp_path: Path) -
         encoding="utf-8",
     )
     venv = tmp_path / ".petal" / "venv"
-    write_lock(tmp_path / "petal.lock", manifest, [ResolvedDep(Dep("rich"), Source.PIP, resolved_version="13.7.0")])
+    write_lock(tmp_path / "petal.lock", manifest, [ResolvedDep(Dep("rich", ">=13"), Source.PIP, resolved_version="13.7.0")])
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
     monkeypatch.setattr(cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[]))
 
@@ -93,6 +93,39 @@ def test_sync_uses_current_lock_without_resolving(monkeypatch, tmp_path: Path) -
 
     assert cli.main(["sync", "--workspace", str(tmp_path)]) == 0
     assert executed["plan"].pip[0].resolved_version == "13.7.0"
+
+
+def test_sync_reresolves_when_discovered_deps_change(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text(
+        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\nrich = \">=13\"\n",
+        encoding="utf-8",
+    )
+    venv = tmp_path / ".petal" / "venv"
+    write_lock(tmp_path / "petal.lock", manifest, [ResolvedDep(Dep("rich", ">=13"), Source.PIP, resolved_version="13.7.0")])
+    monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
+    monkeypatch.setattr(cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[Dep("httpx")]))
+
+    resolved_names = []
+
+    class FakeManager:
+        def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
+            pass
+
+        def preload(self):  # type: ignore[no-untyped-def]
+            pass
+
+        def resolve(self, dep: Dep) -> ResolvedDep:
+            resolved_names.append(dep.name)
+            return ResolvedDep(dep, Source.PIP, resolved_version="1.0")
+
+    monkeypatch.setattr(cli, "ResolutionManager", FakeManager)
+    monkeypatch.setattr(cli, "build_plan", lambda resolved: Plan(pip=resolved))
+    monkeypatch.setattr(cli, "execute", lambda plan, got_venv, **kwargs: True)
+
+    assert cli.main(["sync", "--workspace", str(tmp_path)]) == 0
+    assert resolved_names == ["rich", "httpx"]
 
 
 def test_sync_yes_and_no_flags_pass_prompt_overrides(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]

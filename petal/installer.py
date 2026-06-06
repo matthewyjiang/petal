@@ -5,7 +5,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from petal.config import load_lock, manifest_hash
+from petal.config import dependency_hash, load_lock, manifest_hash
 from petal.models import ResolvedDep, Source
 from petal.planner import Plan
 from petal.resolve.base import (
@@ -111,6 +111,7 @@ def execute(
 def write_lock(lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]) -> None:
     lines = [
         f'manifest_hash = "{manifest_hash(manifest_path)}"',
+        f'dependency_hash = "{dependency_hash([item.dep for item in resolved])}"',
         f'generated_at = "{datetime.now(timezone.utc).isoformat()}"',
         "",
     ]
@@ -135,6 +136,8 @@ def _lock_matches(lock_path: Path, manifest_path: Path, resolved: list[ResolvedD
     except Exception:
         return False
     if lock.manifest_hash != manifest_hash(manifest_path):
+        return False
+    if lock.dependency_hash != dependency_hash([item.dep for item in resolved]):
         return False
     locked = {_frozen_key(item): item for item in lock.resolved}
     planned = {_frozen_key(item): item for item in resolved}
