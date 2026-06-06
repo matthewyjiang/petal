@@ -38,4 +38,7 @@
 
 ## Release
 
-Publishing runs from GitHub Actions when a `v*` tag is pushed. PyPI should be configured for trusted publishing with project `petal-ros`, owner `matthewyjiang`, repository `petal`, workflow `publish.yml`, and environment `pypi`.
+- PR titles and squash-merge commit messages must use Conventional Commits so Release Please can parse them.
+- Use `fix: ...` for patch releases, `feat: ...` for minor releases, and `docs: ...`, `test: ...`, `refactor: ...`, or `chore: ...` when appropriate.
+- Do not use plain descriptive PR titles like `Improve sync/status UX`; use `feat: improve sync/status UX` or `fix: improve sync no-op behavior` instead.
+- Publishing runs from GitHub Actions when a `v*` tag is pushed. PyPI should be configured for trusted publishing with project `petal-ros`, owner `matthewyjiang`, repository `petal`, workflow `publish.yml`, and environment `pypi`.
