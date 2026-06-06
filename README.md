@@ -53,7 +53,7 @@ petal init
 petal add numpy
 petal sync
 petal status
-source .petal/activate
+source <(petal activate)
 ```
 
 ## Examples
