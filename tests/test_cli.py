@@ -136,6 +136,31 @@ def test_activate_passes_shell_flag(monkeypatch, tmp_path: Path, capsys) -> None
     assert captured["shell"] == "fish"
 
 
+def test_install_agent_skill_copies_skill(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    target = tmp_path / "skills"
+
+    assert cli.main(["install-agent-skill", "--target", str(target)]) == 0
+
+    installed = target / "petal-cli" / "SKILL.md"
+    assert installed.exists()
+    assert "name: petal-cli" in installed.read_text(encoding="utf-8")
+    assert str(installed.parent) in capsys.readouterr().out
+
+
+def test_install_agent_skill_existing_requires_force(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    target = tmp_path / "skills"
+    existing = target / "petal-cli"
+    existing.mkdir(parents=True)
+    (existing / "SKILL.md").write_text("custom", encoding="utf-8")
+
+    assert cli.main(["install-agent-skill", "--target", str(target)]) == 0
+    assert (existing / "SKILL.md").read_text(encoding="utf-8") == "custom"
+    assert "--force" in capsys.readouterr().out
+
+    assert cli.main(["install-agent-skill", "--target", str(target), "--force"]) == 0
+    assert "name: petal-cli" in (existing / "SKILL.md").read_text(encoding="utf-8")
+
+
 def test_status_exit_code_2_on_drift(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(

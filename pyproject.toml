@@ -39,5 +39,8 @@ deps = "petal.colcon_ext.verb:DepsVerb"
 [tool.hatch.build.targets.wheel]
 packages = ["petal"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"petal/assets/skills/petal-cli/SKILL.md" = "petal/assets/skills/petal-cli/SKILL.md"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
