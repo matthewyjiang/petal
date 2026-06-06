@@ -69,10 +69,7 @@ def execute(
             _write_lock_if_changed(workspace_root / "petal.lock", manifest_path, [*plan.distro, *plan.apt, *plan.pip])
         return True
 
-    _print_plan(plan, venv)
-
-    if distro_names:
-        print("DISTRO: already provided " + ", ".join(distro_names))
+    _print_changes(plan, missing_apt, missing_pip, venv)
 
     if not _confirm_install(assume_yes=assume_yes, assume_no=assume_no):
         print("petal: install cancelled")
@@ -100,9 +97,6 @@ def execute(
             pip_proc = install_runner([str(venv_python(venv)), "-m", "pip", "install", *pip_reqs_to_install])
             if pip_proc.returncode != 0:
                 raise InstallerError(pip_proc.stderr or proc.stderr or "pip install failed")
-
-    if pip_reqs and not pip_reqs_to_install:
-        print("PIP: already installed " + ", ".join(pip_reqs))
 
     if not distro_names and not apt_pkgs and not pip_reqs:
         print("petal: no dependencies to install")
@@ -239,6 +233,24 @@ def _print_plan(plan: Plan, venv: Path) -> None:
             f"  {item.dep.name:<24} pip      "
             f"{_pip_requirement(item)} -> {venv_python(venv)}"
         )
+
+
+def _print_changes(plan: Plan, missing_apt: list[str], missing_pip: list[ResolvedDep], venv: Path) -> None:
+    change_count = len(missing_apt) + len(missing_pip)
+    noun = "change" if change_count == 1 else "changes"
+    satisfied = len(plan.distro) + (len(plan.apt) - len(missing_apt)) + (len(plan.pip) - len(missing_pip))
+    print(f"{change_count} {noun} to apply  ·  {satisfied} already satisfied")
+    if missing_apt:
+        print("  apt:")
+        missing_apt_set = set(missing_apt)
+        for item in plan.apt:
+            if item.apt_pkg in missing_apt_set:
+                version = f" {item.resolved_version}" if item.resolved_version else ""
+                print(f"    {item.dep.name} -> {item.apt_pkg or item.dep.name}{version}")
+    if missing_pip:
+        print("  pip:")
+        for item in missing_pip:
+            print(f"    {item.dep.name} -> {_pip_requirement(item)}")
 
 
 def _confirm_install(*, assume_yes: bool, assume_no: bool) -> bool:

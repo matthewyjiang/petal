@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import itertools
 import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
 from typing import Protocol
 
@@ -42,7 +46,40 @@ def default_runner(cmd: list[str], **kwargs: object) -> subprocess.CompletedProc
 
 def default_stream_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.run(cmd, check=False, text=True)
+        if not sys.stderr.isatty():
+            return subprocess.run(
+                cmd,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        done = threading.Event()
+
+        def spin() -> None:
+            for char in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
+                if done.is_set():
+                    break
+                print(f"\r  {char} working...", end="", file=sys.stderr, flush=True)
+                time.sleep(0.08)
+
+        thread = threading.Thread(target=spin, daemon=True)
+        thread.start()
+        try:
+            return subprocess.run(
+                cmd,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        finally:
+            done.set()
+            thread.join(timeout=0.2)
+            print("\r", end="", file=sys.stderr, flush=True)
+            print(" " * 24, end="", file=sys.stderr, flush=True)
+            print("\r", end="", file=sys.stderr, flush=True)
     except FileNotFoundError:
         return subprocess.CompletedProcess(
             cmd, returncode=127, stdout="", stderr=f"{cmd[0]}: command not found"
