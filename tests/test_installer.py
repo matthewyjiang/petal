@@ -249,7 +249,9 @@ def test_execute_skips_installed_pip_without_prompt(tmp_path: Path, capsys) -> N
     assert "petal: all dependencies already satisfied" in capsys.readouterr().out
 
 
-def test_execute_uses_canonical_pip_identity_for_underscore_alias(tmp_path: Path) -> None:
+def test_execute_uses_canonical_pip_identity_for_underscore_alias(
+    tmp_path: Path,
+) -> None:
     calls: list[list[str]] = []
 
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]

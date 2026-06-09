@@ -45,7 +45,9 @@ def test_status_reports_in_sync(tmp_path: Path) -> None:
     assert report.in_sync == ["numpy", "rich", "rclpy"]
 
 
-def test_status_uses_canonical_pip_identity_for_underscore_alias(tmp_path: Path) -> None:
+def test_status_uses_canonical_pip_identity_for_underscore_alias(
+    tmp_path: Path,
+) -> None:
     manifest = tmp_path / "petal.toml"
     manifest.write_text('[workspace]\nros_distro = "humble"\n', encoding="utf-8")
     write_lock(

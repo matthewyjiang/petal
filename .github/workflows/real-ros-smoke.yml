@@ -30,8 +30,7 @@ jobs:
       - name: Install petal with colcon verb
         run: |
           . "$HOME/.local/bin/env"
-          uv tool install --editable ".[colcon]"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          uv pip install --system --editable ".[colcon]"
       - name: Run real ROS smoke
         run: |
           . "$HOME/.local/bin/env"
