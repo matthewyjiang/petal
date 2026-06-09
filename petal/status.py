@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from petal.config import load_lock, manifest_hash
-from petal.models import ResolvedDep, Source
+from petal.identity import pip_name
+from petal.models import Source
 from petal.resolve.base import Runner, default_runner, venv_python
 from petal.resolve.distro import DistroResolver
 
@@ -22,7 +23,9 @@ class StatusReport:
         return not self.drifted and not self.missing and not self.manifest_changed
 
 
-def check_status(workspace_root: Path, venv: Path, runner: Runner = default_runner) -> StatusReport:
+def check_status(
+    workspace_root: Path, venv: Path, runner: Runner = default_runner
+) -> StatusReport:
     lock_path = workspace_root / "petal.lock"
     manifest_path = workspace_root / "petal.toml"
     report = StatusReport()
@@ -48,7 +51,7 @@ def check_status(workspace_root: Path, venv: Path, runner: Runner = default_runn
         elif item.chosen_source == Source.PIP:
             if pip_versions is None:
                 pip_versions = _pip_versions(venv, runner)
-            actual = pip_versions.get(name.lower().replace("_", "-"), "")
+            actual = pip_versions.get(pip_name(name), "")
             _bucket(report, name, actual, item.resolved_version)
         elif item.chosen_source == Source.DISTRO:
             if _distro_importable(name, venv, runner):
@@ -98,13 +101,15 @@ def _apt_version(pkg: str, runner: Runner) -> str:
 
 
 def _pip_versions(venv: Path, runner: Runner) -> dict[str, str]:
-    proc = runner(["uv", "pip", "list", "--python", str(venv_python(venv)), "--format", "json"])
+    proc = runner(
+        ["uv", "pip", "list", "--python", str(venv_python(venv)), "--format", "json"]
+    )
     if proc.returncode != 0:
         proc = runner([str(venv_python(venv)), "-m", "pip", "list", "--format", "json"])
     if proc.returncode != 0:
         return {}
     data = json.loads(proc.stdout or "[]")
-    return {str(item["name"]).lower().replace("_", "-"): str(item["version"]) for item in data}
+    return {pip_name(str(item["name"])): str(item["version"]) for item in data}
 
 
 def _distro_importable(name: str, venv: Path, runner: Runner) -> bool:

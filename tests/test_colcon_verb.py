@@ -15,7 +15,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def test_colcon_deps_defaults_to_sync(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     calls: list[list[str]] = []
-    monkeypatch.setattr("petal.colcon_ext.verb.cli.main", lambda argv: calls.append(argv) or 0)
+    monkeypatch.setattr(
+        "petal.colcon_ext.verb.cli.main", lambda argv: calls.append(argv) or 0
+    )
 
     result = DepsVerb().main(context=SimpleNamespace(args=parse_args([])))
 
@@ -25,7 +27,9 @@ def test_colcon_deps_defaults_to_sync(monkeypatch) -> None:  # type: ignore[no-u
 
 def test_colcon_deps_sync_forwards_flags(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
     calls: list[list[str]] = []
-    monkeypatch.setattr("petal.colcon_ext.verb.cli.main", lambda argv: calls.append(argv) or 0)
+    monkeypatch.setattr(
+        "petal.colcon_ext.verb.cli.main", lambda argv: calls.append(argv) or 0
+    )
 
     args = parse_args(["sync", "--workspace", str(tmp_path), "--dry-run", "--frozen"])
     result = DepsVerb().main(context=SimpleNamespace(args=args))
@@ -36,7 +40,9 @@ def test_colcon_deps_sync_forwards_flags(monkeypatch, tmp_path) -> None:  # type
 
 def test_colcon_deps_status(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
     calls: list[list[str]] = []
-    monkeypatch.setattr("petal.colcon_ext.verb.cli.main", lambda argv: calls.append(argv) or 2)
+    monkeypatch.setattr(
+        "petal.colcon_ext.verb.cli.main", lambda argv: calls.append(argv) or 2
+    )
 
     args = parse_args(["status", "--workspace", str(tmp_path)])
     result = DepsVerb().main(context=SimpleNamespace(args=args))

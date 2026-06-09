@@ -8,7 +8,16 @@ from importlib import metadata
 from pathlib import Path
 
 from petal import env, preflight
-from petal.config import add_manifest_dep, dependency_hash, find_workspace_root, load_lock, load_manifest, manifest_hash, remove_manifest_dep, write_manifest
+from petal.config import (
+    add_manifest_dep,
+    dependency_hash,
+    find_workspace_root,
+    load_lock,
+    load_manifest,
+    manifest_hash,
+    remove_manifest_dep,
+    write_manifest,
+)
 from petal.discover.workspace import discover_workspace
 from petal.installer import InstallerError, execute, uninstall, write_lock
 from petal.planner import PlannerConflict, build_plan
@@ -18,7 +27,9 @@ from petal.models import Dep, Source
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
-    workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
+    workspace = find_workspace_root(
+        Path(args.workspace) if args.workspace else Path.cwd()
+    )
     distro = env.detect_ros_distro()
     interpreter = env.distro_python(distro)
     py_version = env.python_version(interpreter)
@@ -33,17 +44,25 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 
 def _cmd_activate(args: argparse.Namespace) -> int:
-    workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
+    workspace = find_workspace_root(
+        Path(args.workspace) if args.workspace else Path.cwd()
+    )
     manifest_path = workspace / "petal.toml"
     manifest = load_manifest(manifest_path) if manifest_path.exists() else None
-    distro = manifest.ros_distro if manifest and manifest.ros_distro else env.detect_ros_distro()
+    distro = (
+        manifest.ros_distro
+        if manifest and manifest.ros_distro
+        else env.detect_ros_distro()
+    )
     shell = getattr(args, "shell", None) or None
     print(env.activation_snippet(workspace, distro, shell), end="")
     return 0
 
 
 def _cmd_clean(args: argparse.Namespace) -> int:
-    workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
+    workspace = find_workspace_root(
+        Path(args.workspace) if args.workspace else Path.cwd()
+    )
     shutil.rmtree(workspace / ".petal" / "venv", ignore_errors=True)
     return 0
 
@@ -69,10 +88,16 @@ def _load_lock_or_none(lock_path: Path):
 
 def _cmd_sync(args: argparse.Namespace) -> int:
     preflight.assert_ok(preflight.check())
-    workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
+    workspace = find_workspace_root(
+        Path(args.workspace) if args.workspace else Path.cwd()
+    )
     manifest_path = workspace / "petal.toml"
     manifest = load_manifest(manifest_path) if manifest_path.exists() else None
-    distro = manifest.ros_distro if manifest and manifest.ros_distro else env.detect_ros_distro()
+    distro = (
+        manifest.ros_distro
+        if manifest and manifest.ros_distro
+        else env.detect_ros_distro()
+    )
     venv = env.ensure_venv(workspace, distro)
 
     discovered = discover_workspace(workspace)
@@ -106,7 +131,9 @@ def _cmd_sync(args: argparse.Namespace) -> int:
 
 def _cmd_add(args: argparse.Namespace) -> int:
     preflight.assert_ok(preflight.check())
-    workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
+    workspace = find_workspace_root(
+        Path(args.workspace) if args.workspace else Path.cwd()
+    )
     manifest_path = workspace / "petal.toml"
     if not manifest_path.exists():
         distro = env.detect_ros_distro()
@@ -146,7 +173,9 @@ def _cmd_add(args: argparse.Namespace) -> int:
 
 def _cmd_remove(args: argparse.Namespace) -> int:
     preflight.assert_ok(preflight.check())
-    workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
+    workspace = find_workspace_root(
+        Path(args.workspace) if args.workspace else Path.cwd()
+    )
     manifest_path = workspace / "petal.toml"
     if not manifest_path.exists():
         print("petal.toml missing; nothing to remove")
@@ -171,22 +200,32 @@ def _dep_from_add_args(name: str, spec: str, source_hint: Source | None) -> Dep:
     return Dep(name=name, version_spec=spec, source_hint=source_hint)
 
 
-def _rewrite_lock(workspace: Path, manifest_path: Path, distro: str, venv: Path) -> None:
+def _rewrite_lock(
+    workspace: Path, manifest_path: Path, distro: str, venv: Path
+) -> None:
     manifest = load_manifest(manifest_path)
     discovered = discover_workspace(workspace)
     deps = [*manifest.deps, *discovered.deps]
     manager = ResolutionManager(ros_distro=distro, venv=venv)
     resolved = [item for dep in deps if (item := manager.resolve(dep))]
     plan = build_plan(resolved)
-    write_lock(workspace / "petal.lock", manifest_path, [*plan.distro, *plan.apt, *plan.pip])
+    write_lock(
+        workspace / "petal.lock", manifest_path, [*plan.distro, *plan.apt, *plan.pip]
+    )
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
     preflight.assert_ok(preflight.check())
-    workspace = find_workspace_root(Path(args.workspace) if args.workspace else Path.cwd())
+    workspace = find_workspace_root(
+        Path(args.workspace) if args.workspace else Path.cwd()
+    )
     manifest_path = workspace / "petal.toml"
     manifest = load_manifest(manifest_path) if manifest_path.exists() else None
-    distro = manifest.ros_distro if manifest and manifest.ros_distro else env.detect_ros_distro()
+    distro = (
+        manifest.ros_distro
+        if manifest and manifest.ros_distro
+        else env.detect_ros_distro()
+    )
     venv = env.venv_path(workspace)
     if not venv.exists():
         venv = env.ensure_venv(workspace, distro)
@@ -219,7 +258,10 @@ def _cmd_install_agent_skill(args: argparse.Namespace) -> int:
         source = Path(dist.locate_file("skills/petal-cli"))
         shutil.copytree(source, target)
     except metadata.PackageNotFoundError as exc:
-        print(f"petal: failed to install agent skill (petal-ros not installed): {exc}", file=sys.stderr)
+        print(
+            f"petal: failed to install agent skill (petal-ros not installed): {exc}",
+            file=sys.stderr,
+        )
         return 1
     except OSError as exc:
         print(f"petal: failed to install agent skill: {exc}", file=sys.stderr)
@@ -259,8 +301,12 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--dry-run", action="store_true")
     sync.add_argument("--frozen", action="store_true")
     sync_prompt = sync.add_mutually_exclusive_group()
-    sync_prompt.add_argument("-y", "--yes", action="store_true", help="install without prompting")
-    sync_prompt.add_argument("--no", action="store_true", help="print plan and do not install")
+    sync_prompt.add_argument(
+        "-y", "--yes", action="store_true", help="install without prompting"
+    )
+    sync_prompt.add_argument(
+        "--no", action="store_true", help="print plan and do not install"
+    )
     sync.set_defaults(func=_cmd_sync)
 
     add = sub.add_parser("add", help="add a dependency to petal.toml and sync it")
@@ -269,8 +315,12 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--workspace")
     add.add_argument("--dry-run", action="store_true")
     add_prompt = add.add_mutually_exclusive_group()
-    add_prompt.add_argument("-y", "--yes", action="store_true", help="install without prompting")
-    add_prompt.add_argument("--no", action="store_true", help="print plan and do not install")
+    add_prompt.add_argument(
+        "-y", "--yes", action="store_true", help="install without prompting"
+    )
+    add_prompt.add_argument(
+        "--no", action="store_true", help="print plan and do not install"
+    )
     source = add.add_mutually_exclusive_group()
     source.add_argument("--pip", action="store_true")
     source.add_argument("--apt", action="store_true")
@@ -286,9 +336,13 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--workspace")
     status.set_defaults(func=_cmd_status)
 
-    skill = sub.add_parser("install-agent-skill", help="install the Petal CLI agent skill")
+    skill = sub.add_parser(
+        "install-agent-skill", help="install the Petal CLI agent skill"
+    )
     skill.add_argument("--target", help="skills directory (default: ~/.agents/skills)")
-    skill.add_argument("--force", action="store_true", help="replace an existing petal-cli skill")
+    skill.add_argument(
+        "--force", action="store_true", help="replace an existing petal-cli skill"
+    )
     skill.set_defaults(func=_cmd_install_agent_skill)
     return parser
 

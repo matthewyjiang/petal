@@ -8,12 +8,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 only
     import tomli as tomllib
 
-from packaging.utils import canonicalize_name
-
 from petal.config import find_workspace_root
 from petal.discover.package_xml import package_name, parse_package_xml
 from petal.discover.pyproject import parse_pyproject
 from petal.discover.setup_cfg import parse_setup_cfg, parse_setup_py
+from petal.identity import dep_key, pip_name
 from petal.models import Dep, Source
 
 
@@ -42,14 +41,16 @@ def _load_overrides(workspace_root: Path) -> dict[str, dict[str, str]]:
     return data.get("overrides", {}) or {}
 
 
-def _apply_overrides(deps: list[Dep], overrides: dict[str, dict[str, str]]) -> list[Dep]:
+def _apply_overrides(
+    deps: list[Dep], overrides: dict[str, dict[str, str]]
+) -> list[Dep]:
     out: list[Dep] = []
     for dep in deps:
         override = overrides.get(dep.name)
         if override and "pip" in override:
             out.append(
                 Dep(
-                    name=canonicalize_name(override["pip"]),
+                    name=pip_name(override["pip"]),
                     version_spec=dep.version_spec,
                     source_hint=Source.PIP,
                     origin_packages=list(dep.origin_packages),
@@ -72,7 +73,7 @@ def _apply_overrides(deps: list[Dep], overrides: dict[str, dict[str, str]]) -> l
 def _merge_deps(deps: list[Dep]) -> list[Dep]:
     merged: dict[str, Dep] = {}
     for dep in deps:
-        key = canonicalize_name(dep.name) if dep.source_hint == Source.PIP else dep.name
+        key = dep_key(dep)
         existing = merged.get(key)
         if existing is None:
             merged[key] = Dep(

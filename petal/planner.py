@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from packaging.specifiers import SpecifierSet
-from packaging.utils import canonicalize_name
 from packaging.version import Version
 
+from petal.identity import dep_key
 from petal.models import ResolvedDep, Source
 
 
@@ -69,13 +69,19 @@ def specs_compatible(specs: list[str]) -> bool:
     bounds = _bounds_for(specs)
 
     if bounds.exact:
-        allowed = [version for version in bounds.exact if combined.contains(version, prereleases=True)]
+        allowed = [
+            version
+            for version in bounds.exact
+            if combined.contains(version, prereleases=True)
+        ]
         return bool(allowed)
 
     if bounds.lower and bounds.upper:
         if bounds.lower > bounds.upper:
             return False
-        if bounds.lower == bounds.upper and not (bounds.lower_inclusive and bounds.upper_inclusive):
+        if bounds.lower == bounds.upper and not (
+            bounds.lower_inclusive and bounds.upper_inclusive
+        ):
             return False
 
     return True
@@ -115,7 +121,9 @@ def _shadow_warnings(resolved: list[ResolvedDep]) -> list[str]:
     warnings: list[str] = []
     for name, items in by_name.items():
         pip_items = [item for item in items if item.chosen_source == Source.PIP]
-        system_items = [item for item in items if item.chosen_source in {Source.APT, Source.DISTRO}]
+        system_items = [
+            item for item in items if item.chosen_source in {Source.APT, Source.DISTRO}
+        ]
         if not pip_items or not system_items:
             continue
         specs = [item.dep.version_spec for item in items if item.dep.version_spec]
@@ -131,7 +139,7 @@ def _shadow_warnings(resolved: list[ResolvedDep]) -> list[str]:
 
 
 def _key(item: ResolvedDep) -> str:
-    return canonicalize_name(item.dep.name)
+    return dep_key(item.dep)
 
 
 def _origin_summary(items: list[ResolvedDep]) -> str:

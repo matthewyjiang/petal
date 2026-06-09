@@ -8,8 +8,7 @@ import time
 from pathlib import Path
 from typing import Protocol
 
-from packaging.utils import canonicalize_name
-
+from petal.identity import pip_name, python_apt_package
 from petal.models import Dep, ResolvedDep
 
 
@@ -20,14 +19,18 @@ class Resolver(Protocol):
 
 
 class Runner(Protocol):
-    def __call__(self, cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]: ...
+    def __call__(
+        self, cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]: ...
 
 
 class StreamRunner(Protocol):
     def __call__(self, cmd: list[str]) -> subprocess.CompletedProcess[str]: ...
 
 
-def default_runner(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+def default_runner(
+    cmd: list[str], **kwargs: object
+) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
             cmd,
@@ -87,14 +90,11 @@ def default_stream_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def canonical(name: str) -> str:
-    return canonicalize_name(name.replace("_", "-"))
+    return pip_name(name)
 
 
 def python_apt_name(name: str) -> str:
-    value = canonical(name)
-    if value.startswith("python3-"):
-        return value
-    return f"python3-{value}"
+    return python_apt_package(name)
 
 
 def dep_requirement(dep: Dep) -> str:

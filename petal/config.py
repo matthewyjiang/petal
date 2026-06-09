@@ -4,7 +4,7 @@ import hashlib
 import re
 from pathlib import Path
 
-from packaging.utils import canonicalize_name
+from petal.identity import dep_key as canonical_dep_key, pip_name, python_apt_package
 
 try:
     import tomllib
@@ -50,11 +50,13 @@ def add_manifest_dep(
     lines = _manifest_lines(path)
     start, end = _deps_span(lines)
     entry = _render_dep_entry(name, version_spec, source_hint, apt_pkg)
-    key = _dep_key(name)
+    key = pip_name(name)
 
     for index in range(start, end):
         if _line_key(lines[index]) == key:
-            lines[index] = _render_dep_entry(_raw_line_key(lines[index]) or name, version_spec, source_hint, apt_pkg)
+            lines[index] = _render_dep_entry(
+                _raw_line_key(lines[index]) or name, version_spec, source_hint, apt_pkg
+            )
             _write_manifest_lines(path, lines)
             return
 
@@ -68,7 +70,7 @@ def add_manifest_dep(
 def remove_manifest_dep(path: Path, name: str) -> bool:
     lines = _manifest_lines(path)
     start, end = _deps_span(lines)
-    key = _dep_key(name)
+    key = pip_name(name)
     for index in range(start, end):
         if _line_key(lines[index]) == key:
             del lines[index]
@@ -84,10 +86,19 @@ def manifest_hash(path: Path) -> str:
 
 def dependency_hash(deps: list[Dep]) -> str:
     lines = []
-    for dep in sorted(deps, key=lambda item: (_dep_key(item.name), item.version_spec, item.source_hint.value if item.source_hint else "")):
+    for dep in sorted(
+        deps,
+        key=lambda item: (
+            canonical_dep_key(item),
+            item.version_spec,
+            item.source_hint.value if item.source_hint else "",
+        ),
+    ):
         source = dep.source_hint.value if dep.source_hint else ""
         origins = ",".join(sorted(dep.origin_packages))
-        lines.append(f"{_dep_key(dep.name)}\t{dep.version_spec}\t{source}\t{origins}")
+        lines.append(
+            f"{canonical_dep_key(dep)}\t{dep.version_spec}\t{source}\t{origins}"
+        )
     digest = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
 
@@ -131,14 +142,14 @@ def _render_dep_entry(
     if source_hint == Source.PIP:
         return f'{key} = {{ pip = "{_escape_toml_string(spec)}" }}'
     if source_hint == Source.APT:
-        pkg = apt_pkg or _python_apt_name(name)
+        pkg = apt_pkg or python_apt_package(name)
         return f'{key} = {{ apt = "{_escape_toml_string(pkg)}" }}'
     return f'{key} = "{_escape_toml_string(spec)}"'
 
 
 def _line_key(line: str) -> str:
     key = _raw_line_key(line)
-    return _dep_key(key) if key else ""
+    return pip_name(key) if key else ""
 
 
 def _raw_line_key(line: str) -> str:
@@ -151,10 +162,6 @@ def _raw_line_key(line: str) -> str:
     return key
 
 
-def _dep_key(name: str) -> str:
-    return canonicalize_name(name.replace("_", "-"))
-
-
 def _toml_key(name: str) -> str:
     if re.fullmatch(r"[A-Za-z0-9_-]+", name):
         return name
@@ -162,14 +169,7 @@ def _toml_key(name: str) -> str:
 
 
 def _escape_toml_string(value: str) -> str:
-    return value.replace('\\', '\\\\').replace('"', '\\"')
-
-
-def _python_apt_name(name: str) -> str:
-    value = _dep_key(name)
-    if value.startswith("python3-"):
-        return value
-    return f"python3-{value}"
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def load_manifest(path: Path) -> Manifest:
