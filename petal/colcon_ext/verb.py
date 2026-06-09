@@ -7,6 +7,7 @@ from petal import cli
 try:  # pragma: no cover - real colcon not required in unit tests
     from colcon_core.verb import VerbExtensionPoint
 except ModuleNotFoundError:  # pragma: no cover
+
     class VerbExtensionPoint:  # type: ignore[no-redef]
         """Small fallback so tests/imports work without colcon installed."""
 

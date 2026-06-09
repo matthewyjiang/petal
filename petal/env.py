@@ -23,9 +23,7 @@ def detect_ros_distro() -> str:
         return env_distro
 
     root = _ros_root()
-    candidates = sorted(
-        p.name for p in root.glob("*") if (p / "setup.bash").is_file()
-    )
+    candidates = sorted(p.name for p in root.glob("*") if (p / "setup.bash").is_file())
     if len(candidates) == 1:
         return candidates[0]
     if len(candidates) > 1:
@@ -91,7 +89,11 @@ def _venv_uses_system_site_packages(venv: Path) -> bool:
 
 def python_version(interpreter: Path) -> str:
     proc = subprocess.run(
-        [str(interpreter), "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+        [
+            str(interpreter),
+            "-c",
+            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+        ],
         check=True,
         text=True,
         stdout=subprocess.PIPE,
@@ -172,7 +174,9 @@ def _ros_setup_for_shell(distro: str, shell: str) -> Path | None:
     return None
 
 
-def activation_snippet(workspace_root: Path, distro: str, shell: str | None = None) -> str:
+def activation_snippet(
+    workspace_root: Path, distro: str, shell: str | None = None
+) -> str:
     """Return a shell snippet to activate the petal venv + ROS env (use: source <(petal activate))."""
     if shell is None:
         shell = _detect_shell()

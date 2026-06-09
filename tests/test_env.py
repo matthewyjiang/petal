@@ -20,7 +20,9 @@ def test_detect_ros_distro_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert env.detect_ros_distro() == "jazzy"
 
 
-def test_detect_ros_distro_from_opt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_detect_ros_distro_from_opt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.delenv("ROS_DISTRO", raising=False)
     monkeypatch.setenv("PETAL_ROS_ROOT", str(tmp_path))
     make_ros(tmp_path, "humble")
@@ -44,7 +46,9 @@ def test_ensure_venv_uses_system_site_packages(
     ws.mkdir()
     monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
     make_ros(ros_root, "humble", "3.10")
-    monkeypatch.setattr(env, "distro_python", lambda distro: Path("/usr/bin/python3.10"))
+    monkeypatch.setattr(
+        env, "distro_python", lambda distro: Path("/usr/bin/python3.10")
+    )
 
     calls: list[list[str]] = []
 
@@ -65,14 +69,22 @@ def test_ensure_venv_uses_system_site_packages(
     venv = env.ensure_venv(ws, "humble")
 
     assert venv == ws / ".petal" / "venv"
-    assert ["/usr/bin/python3.10", "-m", "venv", "--system-site-packages", str(venv)] in calls
+    assert [
+        "/usr/bin/python3.10",
+        "-m",
+        "venv",
+        "--system-site-packages",
+        str(venv),
+    ] in calls
     assert (venv / "COLCON_IGNORE").exists()
     activate = (ws / ".petal" / "activate").read_text(encoding="utf-8")
     assert "source " + str(ros_root / "humble" / "setup.bash") in activate
     assert "source .petal/venv/bin/activate" in activate
 
 
-def test_activation_snippet_bash(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_activation_snippet_bash(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     ros_root = tmp_path / "ros"
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -88,7 +100,9 @@ def test_activation_snippet_bash(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert f"source {setup}" in snippet
 
 
-def test_activation_snippet_zsh_prefers_setup_zsh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_activation_snippet_zsh_prefers_setup_zsh(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     ros_root = tmp_path / "ros"
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -100,13 +114,15 @@ def test_activation_snippet_zsh_prefers_setup_zsh(monkeypatch: pytest.MonkeyPatc
     setup_zsh.write_text("", encoding="utf-8")
 
     snippet = env.activation_snippet(ws, "humble", shell="zsh")
-    assert 'export VIRTUAL_ENV=' in snippet
-    assert 'export PATH=' in snippet
+    assert "export VIRTUAL_ENV=" in snippet
+    assert "export PATH=" in snippet
     assert f"source {setup_zsh}" in snippet
     assert "setup.bash" not in snippet
 
 
-def test_activation_snippet_zsh_fallback_to_bash(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_activation_snippet_zsh_fallback_to_bash(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     ros_root = tmp_path / "ros"
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -120,7 +136,9 @@ def test_activation_snippet_zsh_fallback_to_bash(monkeypatch: pytest.MonkeyPatch
     assert f"source {setup_bash}" in snippet
 
 
-def test_activation_snippet_fish(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_activation_snippet_fish(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     ros_root = tmp_path / "ros"
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -162,8 +180,16 @@ def test_ensure_venv_rejects_version_mismatch(
     (venv / "pyvenv.cfg").write_text("version = 3.11.1\n", encoding="utf-8")
     monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
     make_ros(ros_root, "humble", "3.10")
-    monkeypatch.setattr(env, "distro_python", lambda distro: Path("/usr/bin/python3.10"))
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="3.10\n", stderr=""))
+    monkeypatch.setattr(
+        env, "distro_python", lambda distro: Path("/usr/bin/python3.10")
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(
+            a[0], 0, stdout="3.10\n", stderr=""
+        ),
+    )
 
     with pytest.raises(env.PetalEnvError, match="petal clean"):
         env.ensure_venv(ws, "humble")
@@ -183,11 +209,15 @@ def test_ensure_venv_rejects_missing_system_site_packages(
     )
     monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
     make_ros(ros_root, "humble", "3.10")
-    monkeypatch.setattr(env, "distro_python", lambda distro: Path("/usr/bin/python3.10"))
+    monkeypatch.setattr(
+        env, "distro_python", lambda distro: Path("/usr/bin/python3.10")
+    )
     monkeypatch.setattr(
         subprocess,
         "run",
-        lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="3.10\n", stderr=""),
+        lambda *a, **k: subprocess.CompletedProcess(
+            a[0], 0, stdout="3.10\n", stderr=""
+        ),
     )
 
     with pytest.raises(env.PetalEnvError, match="system site-packages"):

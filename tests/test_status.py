@@ -8,15 +8,19 @@ from petal.models import Dep, ResolvedDep, Source
 from petal.status import check_status, print_report
 
 
-def completed(cmd: list[str], stdout: str = "", returncode: int = 0) -> subprocess.CompletedProcess[str]:
+def completed(
+    cmd: list[str], stdout: str = "", returncode: int = 0
+) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr="")
 
 
 def make_workspace(tmp_path: Path) -> Path:
     manifest = tmp_path / "petal.toml"
-    manifest.write_text("[workspace]\nros_distro = \"humble\"\n", encoding="utf-8")
+    manifest.write_text('[workspace]\nros_distro = "humble"\n', encoding="utf-8")
     resolved = [
-        ResolvedDep(Dep("numpy"), Source.APT, resolved_version="1.24", apt_pkg="python3-numpy"),
+        ResolvedDep(
+            Dep("numpy"), Source.APT, resolved_version="1.24", apt_pkg="python3-numpy"
+        ),
         ResolvedDep(Dep("rich"), Source.PIP, resolved_version="13.7.0"),
         ResolvedDep(Dep("rclpy"), Source.DISTRO),
     ]
@@ -41,9 +45,31 @@ def test_status_reports_in_sync(tmp_path: Path) -> None:
     assert report.in_sync == ["numpy", "rich", "rclpy"]
 
 
+def test_status_uses_canonical_pip_identity_for_underscore_alias(tmp_path: Path) -> None:
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text('[workspace]\nros_distro = "humble"\n', encoding="utf-8")
+    write_lock(
+        tmp_path / "petal.lock",
+        manifest,
+        [ResolvedDep(Dep("foo_bar"), Source.PIP, resolved_version="1.0")],
+    )
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[:3] == ["uv", "pip", "list"]:
+            return completed(cmd, '[{"name":"foo-bar","version":"1.0"}]')
+        return completed(cmd, returncode=1)
+
+    report = check_status(tmp_path, tmp_path / ".petal" / "venv", runner)
+
+    assert report.ok
+    assert report.in_sync == ["foo_bar"]
+
+
 def test_status_reports_drift_missing_and_manifest_change(tmp_path: Path) -> None:
     ws = make_workspace(tmp_path)
-    (ws / "petal.toml").write_text("[workspace]\nros_distro = \"jazzy\"\n", encoding="utf-8")
+    (ws / "petal.toml").write_text(
+        '[workspace]\nros_distro = "jazzy"\n', encoding="utf-8"
+    )
 
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
         if cmd[:2] == ["dpkg-query", "-W"]:
@@ -61,7 +87,9 @@ def test_status_reports_drift_missing_and_manifest_change(tmp_path: Path) -> Non
     assert report.missing == ["rich", "rclpy"]
 
 
-def test_status_accepts_importable_apt_python_dep_when_dpkg_missing(tmp_path: Path) -> None:
+def test_status_accepts_importable_apt_python_dep_when_dpkg_missing(
+    tmp_path: Path,
+) -> None:
     ws = make_workspace(tmp_path)
 
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
@@ -84,7 +112,7 @@ def test_status_accepts_importable_apt_python_dep_when_dpkg_missing(tmp_path: Pa
 
 def test_status_uses_known_import_name_for_distro_dep(tmp_path: Path) -> None:
     manifest = tmp_path / "petal.toml"
-    manifest.write_text("[workspace]\nros_distro = \"humble\"\n", encoding="utf-8")
+    manifest.write_text('[workspace]\nros_distro = "humble"\n', encoding="utf-8")
     write_lock(
         tmp_path / "petal.lock",
         manifest,
@@ -103,7 +131,9 @@ def test_status_uses_known_import_name_for_distro_dep(tmp_path: Path) -> None:
 
 
 def test_print_report_ok_is_concise(capsys) -> None:  # type: ignore[no-untyped-def]
-    ws_report = check_status(Path("/does/not/exist"), Path("/venv"), lambda cmd, **kwargs: completed(cmd))
+    ws_report = check_status(
+        Path("/does/not/exist"), Path("/venv"), lambda cmd, **kwargs: completed(cmd)
+    )
     ws_report.missing.clear()
     ws_report.in_sync.extend(["numpy", "rich"])
 
@@ -113,7 +143,9 @@ def test_print_report_ok_is_concise(capsys) -> None:  # type: ignore[no-untyped-
 
 
 def test_print_report_issues_are_bulleted(capsys) -> None:  # type: ignore[no-untyped-def]
-    ws_report = check_status(Path("/does/not/exist"), Path("/venv"), lambda cmd, **kwargs: completed(cmd))
+    ws_report = check_status(
+        Path("/does/not/exist"), Path("/venv"), lambda cmd, **kwargs: completed(cmd)
+    )
     print_report(ws_report)
     out = capsys.readouterr().out
     assert "0 synced  ·  1 missing" in out

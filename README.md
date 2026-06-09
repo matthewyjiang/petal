@@ -147,8 +147,31 @@ After installing, coding agents that support `~/.agents/skills` can load the `pe
 
 ## Development
 
+Run the same quality gates locally that CI runs:
+
 ```bash
-uv run --with pytest pytest -q
+uv run --extra quality ruff check .
+uv run --extra quality ruff format --check .
+uv run --extra quality basedpyright
+uv run --extra test pytest -q
+```
+
+To apply Ruff formatting locally:
+
+```bash
+uv run --extra quality ruff format .
 ```
 
 Unit tests use fake subprocess runners and do not require network, real ROS, apt, rosdep, uv, or colcon.
+
+### Opt-in real ROS smoke
+
+A real ROS integration smoke is available but intentionally excluded from the default test suite. It runs inside a ROS image and validates that Petal can detect ROS, create a `.petal/venv` with `--system-site-packages`, run `petal init` / `petal sync` / `petal status`, exercise the `colcon deps` wrapper, and emit an activation snippet that exposes ROS Python modules from the venv.
+
+Run it manually in GitHub Actions with the **Real ROS smoke** workflow, or locally from a ROS machine/container that has `rosdep`, `apt-get`, `uv`, and `colcon` installed:
+
+```bash
+source /opt/ros/$ROS_DISTRO/setup.bash
+uv tool install --editable ".[colcon]"
+PETAL_REAL_ROS_SMOKE=1 tests/integration/real_ros_smoke.sh
+```

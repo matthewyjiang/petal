@@ -4,11 +4,19 @@ import re
 from pathlib import Path
 
 from petal.models import Dep, ResolvedDep, Source
-from petal.resolve.base import Runner, canonical, default_runner, dep_requirement, venv_python
+from petal.resolve.base import (
+    Runner,
+    canonical,
+    default_runner,
+    dep_requirement,
+    venv_python,
+)
 
 
 class PipResolver:
-    def __init__(self, venv: Path, runner: Runner = default_runner, use_uv: bool = True) -> None:
+    def __init__(
+        self, venv: Path, runner: Runner = default_runner, use_uv: bool = True
+    ) -> None:
         self.venv = venv
         self.runner = runner
         self.use_uv = use_uv

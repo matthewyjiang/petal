@@ -19,7 +19,9 @@ def fixture(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
-def completed(cmd: list[str], stdout: str, returncode: int = 0) -> subprocess.CompletedProcess[str]:
+def completed(
+    cmd: list[str], stdout: str, returncode: int = 0
+) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr="")
 
 
@@ -56,7 +58,9 @@ def test_rosdep_resolver_maps_apt() -> None:
         assert cmd[:3] == ["rosdep", "resolve", "numpy"]
         return completed(cmd, fixture("rosdep_apt_numpy.txt"))
 
-    resolved = RosdepResolver("humble", runner).resolve(Dep("numpy", source_hint=Source.ROSDEP))
+    resolved = RosdepResolver("humble", runner).resolve(
+        Dep("numpy", source_hint=Source.ROSDEP)
+    )
     assert resolved is not None
     assert resolved.chosen_source == Source.APT
     assert resolved.apt_pkg == "python3-numpy"
@@ -92,7 +96,10 @@ def test_apt_resolver_maps_python_package() -> None:
 
 
 def test_pip_resolver_parses_uv_compile_version(tmp_path: Path) -> None:
-    assert parse_pip_version("ml-collections", fixture("uv_compile_ml_collections.txt")) == "0.1.1"
+    assert (
+        parse_pip_version("ml-collections", fixture("uv_compile_ml_collections.txt"))
+        == "0.1.1"
+    )
 
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
         assert cmd[:3] == ["uv", "pip", "compile"]

@@ -13,7 +13,9 @@ class RosdepResolver:
         return self.resolve(dep) is not None
 
     def resolve(self, dep: Dep) -> ResolvedDep | None:
-        proc = self.runner(["rosdep", "resolve", dep.name, "--rosdistro", self.ros_distro])
+        proc = self.runner(
+            ["rosdep", "resolve", dep.name, "--rosdistro", self.ros_distro]
+        )
         if proc.returncode != 0:
             return None
         parsed = parse_rosdep_resolve(proc.stdout)

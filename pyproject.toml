@@ -24,6 +24,7 @@ classifiers = [
 [project.optional-dependencies]
 colcon = ["colcon-core>=0.15"]
 test = ["pytest>=8"]
+quality = ["basedpyright>=1.29", "ruff>=0.8"]
 
 [project.urls]
 Homepage = "https://github.com/matthewyjiang/petal"
@@ -44,3 +45,17 @@ packages = ["petal"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.basedpyright]
+include = ["petal"]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
+reportMissingModuleSource = "none"
+reportMissingImports = "none"
+reportArgumentType = "none"
+reportGeneralTypeIssues = "none"
+reportOptionalMemberAccess = "none"
+reportCallIssue = "none"

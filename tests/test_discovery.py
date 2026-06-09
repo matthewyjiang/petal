@@ -16,7 +16,9 @@ def dep_map(deps):  # type: ignore[no-untyped-def]
 
 
 def test_package_xml_parses_rosdep_keys() -> None:
-    deps = parse_package_xml(FIXTURES / "ws_discovery" / "src" / "pkg_a" / "package.xml")
+    deps = parse_package_xml(
+        FIXTURES / "ws_discovery" / "src" / "pkg_a" / "package.xml"
+    )
     names = [dep.name for dep in deps]
     assert names == ["rclpy", "numpy", "pytest"]
     assert all(dep.source_hint == Source.ROSDEP for dep in deps)

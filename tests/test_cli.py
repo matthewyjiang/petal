@@ -13,10 +13,14 @@ def _ok_preflight():
     return preflight.PreflightReport()
 
 
-def test_init_writes_manifest_and_creates_venv(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+def test_init_writes_manifest_and_creates_venv(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
     venv = tmp_path / ".petal" / "venv"
     monkeypatch.setattr(env, "detect_ros_distro", lambda: "humble")
-    monkeypatch.setattr(env, "distro_python", lambda distro: Path("/usr/bin/python3.10"))
+    monkeypatch.setattr(
+        env, "distro_python", lambda distro: Path("/usr/bin/python3.10")
+    )
     monkeypatch.setattr(env, "python_version", lambda interpreter: "3.10")
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
 
@@ -30,14 +34,16 @@ def test_init_writes_manifest_and_creates_venv(monkeypatch, tmp_path: Path, caps
 def test_sync_dry_run_orchestrates_resolution(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
-        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\nrich = \">=13\"\n",
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\nrich = ">=13"\n',
         encoding="utf-8",
     )
     venv = tmp_path / ".petal" / "venv"
     executed = {}
 
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
-    monkeypatch.setattr(cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[]))
+    monkeypatch.setattr(
+        cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[])
+    )
 
     class FakeManager:
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
@@ -69,13 +75,19 @@ def test_sync_uses_current_lock_without_resolving(monkeypatch, tmp_path: Path) -
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     manifest = tmp_path / "petal.toml"
     manifest.write_text(
-        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\nrich = \">=13\"\n",
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\nrich = ">=13"\n',
         encoding="utf-8",
     )
     venv = tmp_path / ".petal" / "venv"
-    write_lock(tmp_path / "petal.lock", manifest, [ResolvedDep(Dep("rich", ">=13"), Source.PIP, resolved_version="13.7.0")])
+    write_lock(
+        tmp_path / "petal.lock",
+        manifest,
+        [ResolvedDep(Dep("rich", ">=13"), Source.PIP, resolved_version="13.7.0")],
+    )
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
-    monkeypatch.setattr(cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[]))
+    monkeypatch.setattr(
+        cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[])
+    )
 
     class FakeManager:
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
@@ -99,13 +111,15 @@ def test_sync_falls_back_when_lock_is_corrupt(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     manifest = tmp_path / "petal.toml"
     manifest.write_text(
-        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\nrich = \">=13\"\n",
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\nrich = ">=13"\n',
         encoding="utf-8",
     )
     (tmp_path / "petal.lock").write_text("not toml = [", encoding="utf-8")
     venv = tmp_path / ".petal" / "venv"
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
-    monkeypatch.setattr(cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[]))
+    monkeypatch.setattr(
+        cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[])
+    )
 
     resolved_names = []
 
@@ -128,17 +142,27 @@ def test_sync_falls_back_when_lock_is_corrupt(monkeypatch, tmp_path: Path) -> No
     assert resolved_names == ["rich"]
 
 
-def test_sync_reresolves_when_discovered_deps_change(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_sync_reresolves_when_discovered_deps_change(
+    monkeypatch, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     manifest = tmp_path / "petal.toml"
     manifest.write_text(
-        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\nrich = \">=13\"\n",
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\nrich = ">=13"\n',
         encoding="utf-8",
     )
     venv = tmp_path / ".petal" / "venv"
-    write_lock(tmp_path / "petal.lock", manifest, [ResolvedDep(Dep("rich", ">=13"), Source.PIP, resolved_version="13.7.0")])
+    write_lock(
+        tmp_path / "petal.lock",
+        manifest,
+        [ResolvedDep(Dep("rich", ">=13"), Source.PIP, resolved_version="13.7.0")],
+    )
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
-    monkeypatch.setattr(cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[Dep("httpx")]))
+    monkeypatch.setattr(
+        cli,
+        "discover_workspace",
+        lambda workspace: SimpleNamespace(deps=[Dep("httpx")]),
+    )
 
     resolved_names = []
 
@@ -161,16 +185,20 @@ def test_sync_reresolves_when_discovered_deps_change(monkeypatch, tmp_path: Path
     assert resolved_names == ["rich", "httpx"]
 
 
-def test_sync_yes_and_no_flags_pass_prompt_overrides(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_sync_yes_and_no_flags_pass_prompt_overrides(
+    monkeypatch, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
-        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\nrich = \">=13\"\n",
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\nrich = ">=13"\n',
         encoding="utf-8",
     )
     venv = tmp_path / ".petal" / "venv"
     calls = []
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
-    monkeypatch.setattr(cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[]))
+    monkeypatch.setattr(
+        cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[])
+    )
 
     class FakeManager:
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
@@ -194,7 +222,9 @@ def test_sync_yes_and_no_flags_pass_prompt_overrides(monkeypatch, tmp_path: Path
 
 
 def test_main_handles_keyboard_interrupt(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr(cli, "_cmd_status", lambda args: (_ for _ in ()).throw(KeyboardInterrupt))
+    monkeypatch.setattr(
+        cli, "_cmd_status", lambda args: (_ for _ in ()).throw(KeyboardInterrupt)
+    )
 
     assert cli.main(["status"]) == 130
     assert "petal: cancelled" in capsys.readouterr().err
@@ -209,7 +239,9 @@ def test_activate_prints_eval_snippet(monkeypatch, tmp_path: Path, capsys) -> No
     monkeypatch.setattr(
         env,
         "activation_snippet",
-        lambda workspace, distro, shell: f"export VIRTUAL_ENV={workspace}/.petal/venv\n",
+        lambda workspace, distro, shell: (
+            f"export VIRTUAL_ENV={workspace}/.petal/venv\n"
+        ),
     )
     assert cli.main(["activate", "--workspace", str(tmp_path)]) == 0
     out = capsys.readouterr().out
@@ -261,13 +293,17 @@ def test_install_agent_skill_existing_requires_force(tmp_path: Path, capsys) -> 
 def test_status_exit_code_2_on_drift(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
-        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n",
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n',
         encoding="utf-8",
     )
     (tmp_path / ".petal" / "venv").mkdir(parents=True)
-    monkeypatch.setattr(cli, "check_status", lambda workspace, venv: SimpleNamespace(ok=False))
+    monkeypatch.setattr(
+        cli, "check_status", lambda workspace, venv: SimpleNamespace(ok=False)
+    )
     printed = {}
-    monkeypatch.setattr(cli, "print_report", lambda report: printed.setdefault("called", True))
+    monkeypatch.setattr(
+        cli, "print_report", lambda report: printed.setdefault("called", True)
+    )
 
     assert cli.main(["status", "--workspace", str(tmp_path)]) == 2
     assert printed["called"] is True
@@ -276,7 +312,7 @@ def test_status_exit_code_2_on_drift(monkeypatch, tmp_path: Path) -> None:  # ty
 def test_add_updates_manifest_and_syncs_single_dep(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
-        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\n",
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\n',
         encoding="utf-8",
     )
     venv = tmp_path / ".petal" / "venv"
@@ -304,10 +340,19 @@ def test_add_updates_manifest_and_syncs_single_dep(monkeypatch, tmp_path: Path) 
         return True
 
     monkeypatch.setattr(cli, "execute", fake_execute)
-    monkeypatch.setattr(cli, "_rewrite_lock", lambda *args: executed.setdefault("rewrote", True))
+    monkeypatch.setattr(
+        cli, "_rewrite_lock", lambda *args: executed.setdefault("rewrote", True)
+    )
 
-    assert cli.main(["add", "rich", ">=13", "--pip", "--workspace", str(tmp_path), "--yes"]) == 0
-    assert 'rich = { pip = ">=13" }' in (tmp_path / "petal.toml").read_text(encoding="utf-8")
+    assert (
+        cli.main(
+            ["add", "rich", ">=13", "--pip", "--workspace", str(tmp_path), "--yes"]
+        )
+        == 0
+    )
+    assert 'rich = { pip = ">=13" }' in (tmp_path / "petal.toml").read_text(
+        encoding="utf-8"
+    )
     assert executed["venv"] == venv
     assert executed["dry_run"] is False
     assert executed["plan"].pip[0].resolved_version == "13.7.0"
@@ -317,7 +362,7 @@ def test_add_updates_manifest_and_syncs_single_dep(monkeypatch, tmp_path: Path) 
 def test_add_apt_uses_spec_as_package(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
-        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\n",
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\n',
         encoding="utf-8",
     )
     venv = tmp_path / ".petal" / "venv"
@@ -336,9 +381,16 @@ def test_add_apt_uses_spec_as_package(monkeypatch, tmp_path: Path) -> None:  # t
     monkeypatch.setattr(cli, "build_plan", lambda resolved: Plan(apt=resolved))
     rewrites = {}
     monkeypatch.setattr(cli, "execute", lambda plan, venv, **kwargs: True)
-    monkeypatch.setattr(cli, "_rewrite_lock", lambda *args: rewrites.setdefault("called", True))
+    monkeypatch.setattr(
+        cli, "_rewrite_lock", lambda *args: rewrites.setdefault("called", True)
+    )
 
-    assert cli.main(["add", "opencv", "python3-opencv", "--apt", "--workspace", str(tmp_path)]) == 0
+    assert (
+        cli.main(
+            ["add", "opencv", "python3-opencv", "--apt", "--workspace", str(tmp_path)]
+        )
+        == 0
+    )
     assert 'opencv = { apt = "python3-opencv" }' in (tmp_path / "petal.toml").read_text(
         encoding="utf-8"
     )
@@ -348,7 +400,7 @@ def test_add_apt_uses_spec_as_package(monkeypatch, tmp_path: Path) -> None:  # t
 def test_add_no_and_dry_run_do_not_update_manifest(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
-        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\n",
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\n',
         encoding="utf-8",
     )
     venv = tmp_path / ".petal" / "venv"
@@ -364,7 +416,9 @@ def test_add_no_and_dry_run_do_not_update_manifest(monkeypatch, tmp_path: Path) 
     monkeypatch.setattr(cli, "ResolutionManager", FakeManager)
     monkeypatch.setattr(cli, "build_plan", lambda resolved: Plan(pip=resolved))
     monkeypatch.setattr(cli, "execute", lambda plan, venv, **kwargs: False)
-    monkeypatch.setattr(cli, "_rewrite_lock", lambda *args: (_ for _ in ()).throw(AssertionError))
+    monkeypatch.setattr(
+        cli, "_rewrite_lock", lambda *args: (_ for _ in ()).throw(AssertionError)
+    )
 
     assert cli.main(["add", "rich", "--workspace", str(tmp_path), "--no"]) == 0
     assert cli.main(["add", "httpx", "--workspace", str(tmp_path), "--dry-run"]) == 0
@@ -373,13 +427,17 @@ def test_add_no_and_dry_run_do_not_update_manifest(monkeypatch, tmp_path: Path) 
     assert "httpx" not in manifest
 
 
-def test_add_cancel_does_not_update_manifest(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+def test_add_cancel_does_not_update_manifest(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
-        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\n",
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: tmp_path / ".petal" / "venv")
+    monkeypatch.setattr(
+        env, "ensure_venv", lambda workspace, distro: tmp_path / ".petal" / "venv"
+    )
 
     class FakeManager:
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
@@ -390,17 +448,23 @@ def test_add_cancel_does_not_update_manifest(monkeypatch, tmp_path: Path, capsys
 
     monkeypatch.setattr(cli, "ResolutionManager", FakeManager)
     monkeypatch.setattr(cli, "build_plan", lambda resolved: Plan(pip=resolved))
-    monkeypatch.setattr(cli, "execute", lambda plan, venv, **kwargs: (_ for _ in ()).throw(KeyboardInterrupt))
+    monkeypatch.setattr(
+        cli,
+        "execute",
+        lambda plan, venv, **kwargs: (_ for _ in ()).throw(KeyboardInterrupt),
+    )
 
     assert cli.main(["add", "rich", "--workspace", str(tmp_path)]) == 130
     assert "rich" not in (tmp_path / "petal.toml").read_text(encoding="utf-8")
     assert "cancelled" in capsys.readouterr().err
 
 
-def test_remove_updates_manifest_uninstalls_and_rewrites_lock(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_remove_updates_manifest_uninstalls_and_rewrites_lock(
+    monkeypatch, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
-        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\nrich = \">=13\"\n",
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\nrich = ">=13"\n',
         encoding="utf-8",
     )
     venv = tmp_path / ".petal" / "venv"
@@ -425,11 +489,15 @@ def test_remove_updates_manifest_uninstalls_and_rewrites_lock(monkeypatch, tmp_p
 def test_remove_missing_dep_is_noop(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
-        "[workspace]\nros_distro = \"humble\"\npython_version = \"3.10\"\n\n[deps]\n",
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: tmp_path / ".petal" / "venv")
-    monkeypatch.setattr(cli, "uninstall", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError))
+    monkeypatch.setattr(
+        env, "ensure_venv", lambda workspace, distro: tmp_path / ".petal" / "venv"
+    )
+    monkeypatch.setattr(
+        cli, "uninstall", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError)
+    )
 
     assert cli.main(["remove", "rich", "--workspace", str(tmp_path)]) == 0
     assert "not present" in capsys.readouterr().out

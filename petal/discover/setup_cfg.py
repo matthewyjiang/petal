@@ -5,8 +5,7 @@ import configparser
 from pathlib import Path
 
 from packaging.requirements import InvalidRequirement, Requirement
-from packaging.utils import canonicalize_name
-
+from petal.identity import pip_name
 from petal.models import Dep, Source
 
 
@@ -19,7 +18,7 @@ def _dep_from_requirement(raw: str, origin: str) -> Dep | None:
     except InvalidRequirement:
         return None
     return Dep(
-        name=canonicalize_name(req.name),
+        name=pip_name(req.name),
         version_spec=str(req.specifier),
         source_hint=Source.PIP,
         origin_packages=[origin],

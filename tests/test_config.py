@@ -30,7 +30,7 @@ def test_add_manifest_dep_preserves_overrides(tmp_path: Path) -> None:
 
 def test_add_manifest_dep_updates_existing_canonical_key(tmp_path: Path) -> None:
     manifest = tmp_path / "petal.toml"
-    manifest.write_text("[deps]\nml_collections = \"*\"\n", encoding="utf-8")
+    manifest.write_text('[deps]\nml_collections = "*"\n', encoding="utf-8")
 
     add_manifest_dep(manifest, "ml-collections", version_spec=">=0.1")
 
@@ -51,7 +51,9 @@ def test_add_manifest_dep_renders_apt_default(tmp_path: Path) -> None:
 
 def test_remove_manifest_dep_uses_canonical_key(tmp_path: Path) -> None:
     manifest = tmp_path / "petal.toml"
-    manifest.write_text("[deps]\nml_collections = \"*\"\nrich = \">=13\"\n", encoding="utf-8")
+    manifest.write_text(
+        '[deps]\nml_collections = "*"\nrich = ">=13"\n', encoding="utf-8"
+    )
 
     assert remove_manifest_dep(manifest, "ml-collections") is True
     text = manifest.read_text(encoding="utf-8")
