@@ -286,9 +286,9 @@ def build_parser() -> argparse.ArgumentParser:
     activate.add_argument("--workspace")
     activate.add_argument(
         "--shell",
-        choices=["bash", "zsh", "fish"],
+        choices=["bash", "zsh", "sh"],
         default=None,
-        help="shell dialect (default: auto-detect from $SHELL)",
+        help="ROS 2-supported shell dialect (default: auto-detect from $SHELL)",
     )
     activate.set_defaults(func=_cmd_activate)
 

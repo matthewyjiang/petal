@@ -58,7 +58,13 @@ From a ROS2 workspace root:
 petal init
 petal sync
 petal status
-source <(petal activate)
+source <(petal activate)  # bash/zsh
+```
+
+For POSIX shells without process substitution, use the generated workspace script:
+
+```sh
+. .petal/activate
 ```
 
 ## Examples
@@ -96,7 +102,7 @@ petal add cv_bridge
 | `petal remove <name>` | Remove a dependency. |
 | `petal sync` | Resolve, install, and write `petal.lock`. |
 | `petal status` | Report drift; exits 2 when the workspace is out of sync. |
-| `petal activate` | Print the ROS + venv activation snippet. |
+| `petal activate` | Print the ROS + venv activation snippet. Use `source <(petal activate)` in bash/zsh or `. .petal/activate` in POSIX sh. |
 | `petal clean` | Remove `.petal/venv`. |
 
 Common sync flags: `--yes`, `--no`, `--dry-run`, `--frozen`.

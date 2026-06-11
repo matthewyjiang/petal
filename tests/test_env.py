@@ -78,8 +78,16 @@ def test_ensure_venv_uses_system_site_packages(
     ] in calls
     assert (venv / "COLCON_IGNORE").exists()
     activate = (ws / ".petal" / "activate").read_text(encoding="utf-8")
-    assert "source " + str(ros_root / "humble" / "setup.bash") in activate
-    assert "source .petal/venv/bin/activate" in activate
+    assert "set -e" not in activate
+    assert "must be sourced, not executed" in activate
+    assert "exit 2" in activate
+    assert f"_petal_ws={ws}" in activate
+    assert "${ZSH_VERSION:-}" in activate
+    assert "${BASH_VERSION:-}" in activate
+    assert f"_petal_ros_dir={ros_root / 'humble'}" in activate
+    assert "setup.${_petal_shell}" in activate
+    assert '. "${_petal_ws}/.petal/venv/bin/activate" || return $?' in activate
+    assert 'cd "${_petal_ws}" || return $?' in activate
 
 
 def test_activation_snippet_bash(
@@ -97,7 +105,7 @@ def test_activation_snippet_bash(
     assert f'export VIRTUAL_ENV="{ws / ".petal" / "venv"}"' in snippet
     assert 'export PATH="$VIRTUAL_ENV/bin:$PATH"' in snippet
     assert "unset PYTHONHOME" in snippet
-    assert f"source {setup}" in snippet
+    assert f". {setup}" in snippet
 
 
 def test_activation_snippet_zsh_prefers_setup_zsh(
@@ -116,7 +124,7 @@ def test_activation_snippet_zsh_prefers_setup_zsh(
     snippet = env.activation_snippet(ws, "humble", shell="zsh")
     assert "export VIRTUAL_ENV=" in snippet
     assert "export PATH=" in snippet
-    assert f"source {setup_zsh}" in snippet
+    assert f". {setup_zsh}" in snippet
     assert "setup.bash" not in snippet
 
 
@@ -133,25 +141,7 @@ def test_activation_snippet_zsh_fallback_to_bash(
     setup_bash.write_text("", encoding="utf-8")
 
     snippet = env.activation_snippet(ws, "humble", shell="zsh")
-    assert f"source {setup_bash}" in snippet
-
-
-def test_activation_snippet_fish(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    ros_root = tmp_path / "ros"
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
-    setup_fish = ros_root / "humble" / "setup.fish"
-    setup_fish.parent.mkdir(parents=True)
-    setup_fish.write_text("", encoding="utf-8")
-
-    snippet = env.activation_snippet(ws, "humble", shell="fish")
-    assert "set -gx VIRTUAL_ENV" in snippet
-    assert "fish_add_path" in snippet
-    assert "set -e PYTHONHOME" in snippet
-    assert f"source {setup_fish}" in snippet
+    assert f". {setup_bash}" in snippet
 
 
 def test_activation_snippet_auto_detects_shell(

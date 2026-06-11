@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -137,11 +138,48 @@ def _write_activate(workspace_root: Path, distro: str) -> Path:
     petal_dir = workspace_root / ".petal"
     petal_dir.mkdir(parents=True, exist_ok=True)
     activate = petal_dir / "activate"
+    workspace = workspace_root.resolve()
+    ros_dir = _ros_root() / distro
     activate.write_text(
-        "#!/usr/bin/env bash\n"
-        "set -e\n"
-        f"source {_ros_root() / distro / 'setup.bash'}\n"
-        "source .petal/venv/bin/activate\n",
+        "# Petal workspace activation\n"
+        'if [ -n "${BASH_VERSION:-}" ] && [ "${BASH_SOURCE[0]}" = "$0" ]; then\n'
+        '  echo "petal: this script must be sourced, not executed" >&2\n'
+        '  echo "petal: run: . .petal/activate" >&2\n'
+        "  exit 2\n"
+        "fi\n"
+        'if [ -n "${ZSH_VERSION:-}" ] && case ${ZSH_EVAL_CONTEXT:-} in *:file:*) false;; *) true;; esac; then\n'
+        '  echo "petal: this script must be sourced, not executed" >&2\n'
+        '  echo "petal: run: . .petal/activate" >&2\n'
+        "  exit 2\n"
+        "fi\n"
+        "\n"
+        f"_petal_ws={shlex.quote(str(workspace))}\n"
+        f"_petal_ros_dir={shlex.quote(str(ros_dir))}\n"
+        '_petal_shell="${PETAL_SHELL:-}"\n'
+        'if [ -z "${_petal_shell}" ]; then\n'
+        '  if [ -n "${ZSH_VERSION:-}" ]; then\n'
+        "    _petal_shell=zsh\n"
+        '  elif [ -n "${BASH_VERSION:-}" ]; then\n'
+        "    _petal_shell=bash\n"
+        "  else\n"
+        '    _petal_shell=$(basename "${SHELL:-sh}")\n'
+        "  fi\n"
+        "fi\n"
+        "\n"
+        'if [ -f "${_petal_ros_dir}/setup.${_petal_shell}" ]; then\n'
+        '  . "${_petal_ros_dir}/setup.${_petal_shell}" || return $?\n'
+        'elif [ -f "${_petal_ros_dir}/setup.sh" ]; then\n'
+        '  . "${_petal_ros_dir}/setup.sh" || return $?\n'
+        'elif [ -f "${_petal_ros_dir}/setup.bash" ]; then\n'
+        '  . "${_petal_ros_dir}/setup.bash" || return $?\n'
+        "else\n"
+        '  echo "petal: no ROS setup file found in ${_petal_ros_dir}" >&2\n'
+        "  return 1\n"
+        "fi\n"
+        "\n"
+        '. "${_petal_ws}/.petal/venv/bin/activate" || return $?\n'
+        'cd "${_petal_ws}" || return $?\n'
+        "unset _petal_ws _petal_ros_dir _petal_shell\n",
         encoding="utf-8",
     )
     activate.chmod(0o755)
@@ -149,24 +187,22 @@ def _write_activate(workspace_root: Path, distro: str) -> Path:
 
 
 def _detect_shell() -> str:
-    """Return shell name (bash/zsh/fish) from $SHELL, defaulting to bash."""
+    """Return ROS 2-supported shell name from $SHELL, defaulting to sh."""
     shell_path = os.environ.get("SHELL", "")
     name = Path(shell_path).name
-    if name in ("bash", "zsh", "fish"):
+    if name in ("bash", "zsh", "sh"):
         return name
-    return "bash"
+    return "sh"
 
 
 def _ros_setup_for_shell(distro: str, shell: str) -> Path | None:
     """Return the best ROS setup file for the given shell, or None if none exist."""
     ros_dir = _ros_root() / distro
-    if shell == "fish":
-        candidates = ["setup.fish", "setup.bash"]
-    elif shell == "zsh":
-        candidates = ["setup.zsh", "setup.sh", "setup.bash"]
-    else:
-        # bash and anything else
-        candidates = ["setup.bash", "setup.sh"]
+    candidates = [f"setup.{shell}"]
+    if shell != "sh":
+        candidates.append("setup.sh")
+    if shell != "bash":
+        candidates.append("setup.bash")
     for name in candidates:
         path = ros_dir / name
         if path.exists():
@@ -183,28 +219,14 @@ def activation_snippet(
     venv = venv_path(workspace_root)
     ros_setup = _ros_setup_for_shell(distro, shell)
 
-    if shell == "fish":
-        lines = [
-            f'set -gx VIRTUAL_ENV "{venv}"',
-            'fish_add_path "$VIRTUAL_ENV/bin"',
-            "set -e PYTHONHOME",
-        ]
-        if ros_setup is not None and ros_setup.suffix == ".fish":
-            lines.append(f"source {ros_setup}")
-        elif ros_setup is not None:
-            # fish can't source bash/sh; best effort note
-            lines.append(f"# NOTE: source {ros_setup} in a bash shell first")
-        return "\n".join(lines) + "\n"
-    else:
-        # bash / zsh / sh-compatible
-        lines = [
-            f'export VIRTUAL_ENV="{venv}"',
-            'export PATH="$VIRTUAL_ENV/bin:$PATH"',
-            "unset PYTHONHOME",
-        ]
-        if ros_setup is not None:
-            lines.append(f"source {ros_setup}")
-        return "\n".join(lines) + "\n"
+    lines = [
+        f'export VIRTUAL_ENV="{venv}"',
+        'export PATH="$VIRTUAL_ENV/bin:$PATH"',
+        "unset PYTHONHOME",
+    ]
+    if ros_setup is not None:
+        lines.append(f". {shlex.quote(str(ros_setup))}")
+    return "\n".join(lines) + "\n"
 
 
 def distro_provided_modules(distro: str) -> set[str]:
