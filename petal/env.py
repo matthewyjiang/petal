@@ -142,14 +142,14 @@ def _write_activate(workspace_root: Path, distro: str) -> Path:
     ros_dir = _ros_root() / distro
     activate.write_text(
         "# Petal workspace activation\n"
-        "if [ -n \"${BASH_VERSION:-}\" ] && [ \"${BASH_SOURCE[0]}\" = \"$0\" ]; then\n"
-        "  echo \"petal: this script must be sourced, not executed\" >&2\n"
-        "  echo \"petal: run: . .petal/activate\" >&2\n"
+        'if [ -n "${BASH_VERSION:-}" ] && [ "${BASH_SOURCE[0]}" = "$0" ]; then\n'
+        '  echo "petal: this script must be sourced, not executed" >&2\n'
+        '  echo "petal: run: . .petal/activate" >&2\n'
         "  exit 2\n"
         "fi\n"
-        "if [ -n \"${ZSH_VERSION:-}\" ] && case ${ZSH_EVAL_CONTEXT:-} in *:file:*) false;; *) true;; esac; then\n"
-        "  echo \"petal: this script must be sourced, not executed\" >&2\n"
-        "  echo \"petal: run: . .petal/activate\" >&2\n"
+        'if [ -n "${ZSH_VERSION:-}" ] && case ${ZSH_EVAL_CONTEXT:-} in *:file:*) false;; *) true;; esac; then\n'
+        '  echo "petal: this script must be sourced, not executed" >&2\n'
+        '  echo "petal: run: . .petal/activate" >&2\n'
         "  exit 2\n"
         "fi\n"
         "\n"
@@ -158,13 +158,13 @@ def _write_activate(workspace_root: Path, distro: str) -> Path:
         '_petal_shell="${PETAL_SHELL:-}"\n'
         'if [ -z "${_petal_shell}" ]; then\n'
         '  if [ -n "${ZSH_VERSION:-}" ]; then\n'
-        '    _petal_shell=zsh\n'
+        "    _petal_shell=zsh\n"
         '  elif [ -n "${BASH_VERSION:-}" ]; then\n'
-        '    _petal_shell=bash\n'
-        '  else\n'
+        "    _petal_shell=bash\n"
+        "  else\n"
         '    _petal_shell=$(basename "${SHELL:-sh}")\n'
-        '  fi\n'
-        'fi\n'
+        "  fi\n"
+        "fi\n"
         "\n"
         'if [ -f "${_petal_ros_dir}/setup.${_petal_shell}" ]; then\n'
         '  . "${_petal_ros_dir}/setup.${_petal_shell}" || return $?\n'

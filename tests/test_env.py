@@ -85,7 +85,7 @@ def test_ensure_venv_uses_system_site_packages(
     assert "${ZSH_VERSION:-}" in activate
     assert "${BASH_VERSION:-}" in activate
     assert f"_petal_ros_dir={ros_root / 'humble'}" in activate
-    assert 'setup.${_petal_shell}' in activate
+    assert "setup.${_petal_shell}" in activate
     assert '. "${_petal_ws}/.petal/venv/bin/activate" || return $?' in activate
     assert 'cd "${_petal_ws}" || return $?' in activate
 
