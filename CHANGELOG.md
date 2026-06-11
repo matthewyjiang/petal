@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/matthewyjiang/petal/compare/v0.2.1...v0.2.2) (2026-06-11)
+
+
+### Bug Fixes
+
+* make activation script safe to source ([#15](https://github.com/matthewyjiang/petal/issues/15)) ([1e5b0c1](https://github.com/matthewyjiang/petal/commit/1e5b0c14c9a1c7c3a2788470acf7186637cf56d3))
+
 ## [0.2.1](https://github.com/matthewyjiang/petal/compare/v0.2.0...v0.2.1) (2026-06-06)
 
 
