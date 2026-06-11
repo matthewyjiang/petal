@@ -54,7 +54,13 @@ petal init
 petal add numpy
 petal sync
 petal status
-source .petal/activate
+source <(petal activate)  # bash/zsh
+```
+
+For POSIX shells without process substitution, use the generated workspace script:
+
+```sh
+. .petal/activate
 ```
 
 ## Core Commands
@@ -70,6 +76,8 @@ petal sync --dry-run    # show commands, install nothing
 petal sync --frozen     # enforce petal.lock
 petal status            # report drift; exits 2 on drift/missing/change
 petal activate          # print shell snippet for ROS + venv activation
+                         # bash/zsh: source <(petal activate)
+                         # POSIX sh: . .petal/activate
 petal clean             # remove .petal/venv
 ```
 
@@ -154,4 +162,4 @@ When helping with Petal:
 1. Ask for the ROS distro, workspace root, and dependency name/spec if missing.
 2. Prefer commands that do not mutate state first (`status`, `sync --dry-run`) unless the user explicitly asks to install.
 3. Explain whether a dependency should resolve through ROS/system, rosdep, apt, or PyPI.
-4. Remind users to `source .petal/activate` before running ROS Python code that needs Petal-managed packages.
+4. Remind users to activate before running ROS Python code that needs Petal-managed packages. Prefer `source <(petal activate)` for bash/zsh and `. .petal/activate` for POSIX shells without process substitution.

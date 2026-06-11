@@ -261,8 +261,8 @@ def test_activate_passes_shell_flag(monkeypatch, tmp_path: Path, capsys) -> None
         return "snippet\n"
 
     monkeypatch.setattr(env, "activation_snippet", fake_snippet)
-    assert cli.main(["activate", "--workspace", str(tmp_path), "--shell", "fish"]) == 0
-    assert captured["shell"] == "fish"
+    assert cli.main(["activate", "--workspace", str(tmp_path), "--shell", "zsh"]) == 0
+    assert captured["shell"] == "zsh"
 
 
 def test_install_agent_skill_copies_skill(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
