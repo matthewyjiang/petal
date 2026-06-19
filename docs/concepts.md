@@ -1,5 +1,7 @@
 # Concepts
 
+Petal's design follows from its [ROS-first philosophy](/philosophy): keep the Ubuntu/ROS Python environment coherent, then add workspace-local PyPI packages only where needed.
+
 ## Workspace-scoped dependency management
 
 Petal manages dependencies at the ROS2 workspace level. It is not a ROS node isolation tool: ROS2 uses one shared Python interpreter view, and Petal preserves that expectation.
@@ -39,4 +41,4 @@ Docker is useful for CI, demos, deployment images, and reproducing a full OS env
 
 Petal is for the common case where you develop directly on a ROS machine and want dependencies to stay aligned with that machine's Ubuntu/ROS install.
 
-Use Docker for OS-level isolation. Use Petal for workspace-level dependency management without pip installs into system Python.
+Use Docker for OS-level isolation. Use Petal for workspace-level dependency management without pip installs into system Python. For more context, see [Philosophy](/philosophy).

@@ -10,8 +10,8 @@ hero:
       text: Get started
       link: /getting-started
     - theme: alt
-      text: CLI reference
-      link: /cli
+      text: Why Petal?
+      link: /philosophy
 
 features:
   - title: ROS-aware by default
@@ -21,6 +21,14 @@ features:
   - title: Reproducible installs
     details: Track requested dependencies in petal.toml and resolved sources in petal.lock.
 ---
+
+## Why Petal?
+
+ROS Python environments are not ordinary Python app environments. ROS builds against the packages shipped by Ubuntu, and replacing those packages with pip-installed copies can break an otherwise healthy workspace.
+
+Petal's philosophy is simple: keep the ROS/Ubuntu base intact, install PyPI-only packages in workspace-local state, and never pip into system Python.
+
+[Read the philosophy →](/philosophy)
 
 ## Quickstart
 

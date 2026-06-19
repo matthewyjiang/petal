@@ -10,6 +10,7 @@ export default defineConfig({
     logo: '🌱',
     siteTitle: 'Petal',
     nav: [
+      { text: 'Philosophy', link: '/philosophy' },
       { text: 'Guide', link: '/getting-started' },
       { text: 'CLI', link: '/cli' },
       { text: 'GitHub', link: 'https://github.com/matthewyjiang/petal' }
@@ -19,6 +20,7 @@ export default defineConfig({
         text: 'Guide',
         items: [
           { text: 'Home', link: '/' },
+          { text: 'Philosophy', link: '/philosophy' },
           { text: 'Getting started', link: '/getting-started' },
           { text: 'Concepts', link: '/concepts' },
           { text: 'CLI reference', link: '/cli' },
