@@ -18,14 +18,24 @@ export default defineConfig({
     ],
     sidebar: [
       {
-        text: 'Guide',
+        text: 'Start here',
         items: [
           { text: 'Home', link: '/' },
           { text: 'Philosophy', link: '/philosophy' },
-          { text: 'Getting started', link: '/getting-started' },
+          { text: 'Getting started', link: '/getting-started' }
+        ]
+      },
+      {
+        text: 'Using Petal',
+        items: [
           { text: 'Concepts', link: '/concepts' },
           { text: 'CLI reference', link: '/cli' },
-          { text: 'Colcon integration', link: '/colcon' },
+          { text: 'Colcon integration', link: '/colcon' }
+        ]
+      },
+      {
+        text: 'Project',
+        items: [
           { text: 'Agent skill', link: '/agent-skill' },
           { text: 'Development', link: '/development' },
           { text: 'Changelog', link: '/changelog' }
