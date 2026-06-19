@@ -13,6 +13,7 @@ export default defineConfig({
       { text: 'Philosophy', link: '/philosophy' },
       { text: 'Guide', link: '/getting-started' },
       { text: 'CLI', link: '/cli' },
+      { text: 'Changelog', link: '/changelog' },
       { text: 'GitHub', link: 'https://github.com/matthewyjiang/petal' }
     ],
     sidebar: [
@@ -26,7 +27,8 @@ export default defineConfig({
           { text: 'CLI reference', link: '/cli' },
           { text: 'Colcon integration', link: '/colcon' },
           { text: 'Agent skill', link: '/agent-skill' },
-          { text: 'Development', link: '/development' }
+          { text: 'Development', link: '/development' },
+          { text: 'Changelog', link: '/changelog' }
         ]
       }
     ],
