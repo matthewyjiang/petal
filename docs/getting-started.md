@@ -52,9 +52,27 @@ This creates:
 
 ## Add dependencies
 
+Apt-resolved package:
+
 ```bash
 petal add numpy
+```
+
+PyPI package:
+
+```bash
+petal add huggingface
+```
+
+Version spec:
+
+```bash
 petal add ultralytics ">=8,<9"
+```
+
+Rosdep-resolved ROS package:
+
+```bash
 petal add cv_bridge
 ```
 
