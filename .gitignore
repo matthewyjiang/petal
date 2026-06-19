@@ -5,3 +5,5 @@ __pycache__/
 dist/
 uv.lock
 .petal/
+
+node_modules/
