@@ -14,12 +14,15 @@ hero:
       link: /philosophy
 
 features:
-  - title: ROS-first philosophy
+  - icon: 🤖
+    title: ROS-first philosophy
     details: Preserve the Ubuntu/ROS Python base instead of shadowing it with pip-installed packages.
     link: /philosophy
     linkText: Read why
-  - title: Workspace-local state
+  - icon: 🌱
+    title: Workspace-local state
     details: Install PyPI-only packages into .petal/venv, never system Python.
-  - title: Reproducible installs
+  - icon: 🔒
+    title: Reproducible installs
     details: Track requested dependencies in petal.toml and resolved sources in petal.lock.
 ---
