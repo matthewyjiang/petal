@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib import metadata
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -288,6 +289,49 @@ def test_install_agent_skill_existing_requires_force(tmp_path: Path, capsys) -> 
 
     assert cli.main(["install-agent-skill", "--target", str(target), "--force"]) == 0
     assert "name: petal-cli" in (existing / "SKILL.md").read_text(encoding="utf-8")
+
+
+def _raise_package_not_found(_name):  # type: ignore[no-untyped-def]
+    raise metadata.PackageNotFoundError("petal-ros")
+
+
+def test_skill_source_falls_back_to_source_tree(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(cli.metadata, "distribution", _raise_package_not_found)
+
+    source = cli._skill_source()
+
+    assert source.name == "petal-cli"
+    assert (source / "SKILL.md").is_file()
+
+
+def test_install_agent_skill_uses_source_tree_when_package_missing(  # type: ignore[no-untyped-def]
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(cli.metadata, "distribution", _raise_package_not_found)
+    target = tmp_path / "skills"
+
+    assert cli.main(["install-agent-skill", "--target", str(target)]) == 0
+
+    installed = target / "petal-cli" / "SKILL.md"
+    assert installed.exists()
+    assert "name: petal-cli" in installed.read_text(encoding="utf-8")
+
+
+def test_install_agent_skill_noop_skips_source_resolution(  # type: ignore[no-untyped-def]
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    target = tmp_path / "skills" / "petal-cli"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("custom", encoding="utf-8")
+
+    def _fail() -> Path:
+        raise AssertionError("source must not be resolved for an existing install")
+
+    monkeypatch.setattr(cli, "_skill_source", _fail)
+
+    assert cli.main(["install-agent-skill", "--target", str(tmp_path / "skills")]) == 0
+    assert "already installed" in capsys.readouterr().out
+    assert (target / "SKILL.md").read_text(encoding="utf-8") == "custom"
 
 
 def test_status_exit_code_2_on_drift(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
