@@ -2,9 +2,12 @@
 layout: home
 
 hero:
-  name: 🌸 Petal
+  name: Petal
   text: Workspace-scoped Python dependency manager for ROS2
   tagline: Keep ROS Python environments coherent while using the PyPI packages your workspace needs.
+  image:
+    src: /petal-hero.svg
+    alt: Pink Petal flower dependency diagram
   actions:
     - theme: brand
       text: Get started
