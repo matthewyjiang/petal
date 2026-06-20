@@ -13,8 +13,7 @@ export default defineConfig({
       { text: 'Philosophy', link: '/philosophy' },
       { text: 'Guide', link: '/getting-started' },
       { text: 'CLI', link: '/cli' },
-      { text: 'Changelog', link: '/changelog' },
-      { text: 'GitHub', link: 'https://github.com/matthewyjiang/petal' }
+      { text: 'Changelog', link: '/changelog' }
     ],
     sidebar: [
       {
