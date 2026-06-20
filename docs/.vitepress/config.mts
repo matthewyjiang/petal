@@ -42,6 +42,12 @@ export default defineConfig({
           { text: 'Development', link: '/development' },
           { text: 'Changelog', link: '/changelog' }
         ]
+      },
+      {
+        text: 'Credits',
+        items: [
+          { text: 'Attributions', link: '/attributions' }
+        ]
       }
     ],
     socialLinks: [
@@ -56,7 +62,7 @@ export default defineConfig({
     },
     footer: {
       message: 'Released under the MIT License.',
-      copyright: 'Copyright © Matthew Jiang'
+      copyright: '© Matthew Jiang and contributors'
     }
   }
 })
