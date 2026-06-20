@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.3](https://github.com/matthewyjiang/petal/compare/v0.2.2...v0.2.3) (2026-06-20)
+
+
+### Bug Fixes
+
+* locate agent skill in source tree for editable installs ([#17](https://github.com/matthewyjiang/petal/issues/17)) ([761623f](https://github.com/matthewyjiang/petal/commit/761623fb62b2db6268765dfbd550648ff419f0e4))
+
+
+### Documentation
+
+* add VitePress site ([#18](https://github.com/matthewyjiang/petal/issues/18)) ([42acfac](https://github.com/matthewyjiang/petal/commit/42acfacd8d68691c17718b209731d123d6f0c47c))
+
 ## [0.2.2](https://github.com/matthewyjiang/petal/compare/v0.2.1...v0.2.2) (2026-06-11)
 
 
