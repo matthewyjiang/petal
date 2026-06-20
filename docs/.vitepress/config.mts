@@ -40,6 +40,7 @@ export default defineConfig({
         items: [
           { text: 'Agent skill', link: '/agent-skill' },
           { text: 'Development', link: '/development' },
+          { text: 'Attributions', link: '/attributions' },
           { text: 'Changelog', link: '/changelog' }
         ]
       }
@@ -56,7 +57,7 @@ export default defineConfig({
     },
     footer: {
       message: 'Released under the MIT License.',
-      copyright: 'Copyright © Matthew Jiang'
+      copyright: '© Matthew Jiang and contributors'
     }
   }
 })
