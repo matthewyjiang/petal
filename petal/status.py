@@ -108,7 +108,10 @@ def _pip_versions(venv: Path, runner: Runner) -> dict[str, str]:
         proc = runner([str(venv_python(venv)), "-m", "pip", "list", "--format", "json"])
     if proc.returncode != 0:
         return {}
-    data = json.loads(proc.stdout or "[]")
+    try:
+        data = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError:
+        return {}
     return {pip_name(str(item["name"])): str(item["version"]) for item in data}
 
 

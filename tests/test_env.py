@@ -102,10 +102,13 @@ def test_activation_snippet_bash(
     setup.write_text("", encoding="utf-8")
 
     snippet = env.activation_snippet(ws, "humble", shell="bash")
-    assert f'export VIRTUAL_ENV="{ws / ".petal" / "venv"}"' in snippet
-    assert 'export PATH="$VIRTUAL_ENV/bin:$PATH"' in snippet
-    assert "unset PYTHONHOME" in snippet
-    assert f". {setup}" in snippet
+    lines = snippet.splitlines()
+    assert lines == [
+        "unset PYTHONHOME",
+        f". {setup}",
+        f'export VIRTUAL_ENV="{ws / ".petal" / "venv"}"',
+        'export PATH="$VIRTUAL_ENV/bin:$PATH"',
+    ]
 
 
 def test_activation_snippet_zsh_prefers_setup_zsh(
@@ -157,6 +160,23 @@ def test_activation_snippet_auto_detects_shell(
     snippet = env.activation_snippet(ws, "humble", shell=None)
     # zsh uses same bash-style exports
     assert "export VIRTUAL_ENV" in snippet
+
+
+def test_activation_snippet_without_ros_setup_still_activates_venv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ros_root = tmp_path / "ros"
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
+    (ros_root / "humble").mkdir(parents=True)
+
+    snippet = env.activation_snippet(ws, "humble", shell="bash")
+
+    assert f'export VIRTUAL_ENV="{ws / ".petal" / "venv"}"' in snippet
+    assert 'export PATH="$VIRTUAL_ENV/bin:$PATH"' in snippet
+    assert "unset PYTHONHOME" in snippet
+    assert ". " not in snippet
 
 
 def test_ensure_venv_rejects_version_mismatch(

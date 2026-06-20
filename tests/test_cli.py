@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from petal import cli, env, preflight
-from petal.installer import write_lock
+from petal.installer import InstallerError, write_lock
 from petal.models import Dep, ResolvedDep, Source
 from petal.planner import Plan
 
@@ -530,6 +530,125 @@ def test_remove_updates_manifest_uninstalls_and_rewrites_lock(
     assert calls["rewrite"] == (tmp_path, tmp_path / "petal.toml", "humble", venv)
 
 
+def test_remove_apt_entry_by_manifest_key_uninstalls_and_rewrites_lock(
+    monkeypatch, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text(
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\nopencv = { apt = "python3-opencv" }\n',
+        encoding="utf-8",
+    )
+    venv = tmp_path / ".petal" / "venv"
+    calls = {}
+    monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
+
+    def fake_uninstall(name: str, got_venv: Path, *, dry_run: bool) -> None:
+        calls["uninstall"] = (name, got_venv, dry_run)
+
+    def fake_rewrite_lock(
+        workspace: Path, manifest_path: Path, distro: str, got_venv: Path
+    ) -> None:
+        calls["rewrite"] = (workspace, manifest_path, distro, got_venv)
+
+    monkeypatch.setattr(cli, "uninstall", fake_uninstall)
+    monkeypatch.setattr(cli, "_rewrite_lock", fake_rewrite_lock)
+
+    assert cli.main(["remove", "opencv", "--workspace", str(tmp_path)]) == 0
+    manifest_text = manifest.read_text(encoding="utf-8")
+    assert "opencv" not in manifest_text
+    assert calls["uninstall"] == ("opencv", venv, False)
+    assert calls["rewrite"] == (tmp_path, manifest, "humble", venv)
+
+
+def test_remove_apt_package_name_is_not_treated_as_manifest_key(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text(
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\nopencv = { apt = "python3-opencv" }\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        env, "ensure_venv", lambda workspace, distro: tmp_path / ".petal" / "venv"
+    )
+    monkeypatch.setattr(
+        cli, "uninstall", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError)
+    )
+    monkeypatch.setattr(
+        cli,
+        "_rewrite_lock",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError),
+    )
+
+    assert cli.main(["remove", "python3-opencv", "--workspace", str(tmp_path)]) == 0
+    assert "not present" in capsys.readouterr().out
+    assert "opencv" in manifest.read_text(encoding="utf-8")
+
+
+def test_remove_uninstall_failure_preserves_manifest(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text(
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\nrich = ">=13"\n',
+        encoding="utf-8",
+    )
+    venv = tmp_path / ".petal" / "venv"
+    monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
+
+    def fake_uninstall(name: str, got_venv: Path, *, dry_run: bool) -> None:
+        assert name == "rich"
+        assert got_venv == venv
+        assert dry_run is False
+        raise InstallerError("uninstall failed")
+
+    monkeypatch.setattr(cli, "uninstall", fake_uninstall)
+    monkeypatch.setattr(
+        cli,
+        "_rewrite_lock",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError),
+    )
+
+    assert cli.main(["remove", "rich", "--workspace", str(tmp_path)]) == 1
+    assert "rich" in manifest.read_text(encoding="utf-8")
+    assert "petal: uninstall failed" in capsys.readouterr().err
+
+
+def test_remove_single_quoted_manifest_key_does_not_rewrite_lock_on_remove_failure(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
+    manifest = tmp_path / "petal.toml"
+    original = "[workspace]\nros_distro = 'humble'\npython_version = '3.10'\n\n[deps]\n'rich' = '>=13'\n"
+    manifest.write_text(original, encoding="utf-8")
+    venv = tmp_path / ".petal" / "venv"
+    calls = {}
+    monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
+
+    def fake_uninstall(name: str, got_venv: Path, *, dry_run: bool) -> None:
+        calls["uninstall"] = (name, got_venv, dry_run)
+
+    def fake_rewrite_lock(
+        workspace: Path, manifest_path: Path, distro: str, got_venv: Path
+    ) -> None:
+        calls["rewrite"] = (workspace, manifest_path, distro, got_venv)
+
+    monkeypatch.setattr(cli, "uninstall", fake_uninstall)
+    monkeypatch.setattr(cli, "_rewrite_lock", fake_rewrite_lock)
+
+    assert cli.main(["remove", "rich", "--workspace", str(tmp_path)]) == 1
+    assert calls["uninstall"] == ("rich", venv, False)
+    assert "rewrite" not in calls
+    assert manifest.read_text(encoding="utf-8") == original
+    assert (
+        "petal: could not remove rich from petal.toml; lock not rewritten"
+        in capsys.readouterr().err
+    )
+
+
 def test_remove_missing_dep_is_noop(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
@@ -545,3 +664,29 @@ def test_remove_missing_dep_is_noop(monkeypatch, tmp_path: Path, capsys) -> None
 
     assert cli.main(["remove", "rich", "--workspace", str(tmp_path)]) == 0
     assert "not present" in capsys.readouterr().out
+
+
+def test_remove_dry_run_uninstalls_without_mutating_manifest(
+    monkeypatch, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
+    manifest = tmp_path / "petal.toml"
+    original = '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\nrich = ">=13"\n'
+    manifest.write_text(original, encoding="utf-8")
+    venv = tmp_path / ".petal" / "venv"
+    calls = {}
+    monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
+
+    def fake_uninstall(name: str, got_venv: Path, *, dry_run: bool) -> None:
+        calls["uninstall"] = (name, got_venv, dry_run)
+
+    monkeypatch.setattr(cli, "uninstall", fake_uninstall)
+    monkeypatch.setattr(
+        cli,
+        "_rewrite_lock",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError),
+    )
+
+    assert cli.main(["remove", "rich", "--workspace", str(tmp_path), "--dry-run"]) == 0
+    assert manifest.read_text(encoding="utf-8") == original
+    assert calls["uninstall"] == ("rich", venv, True)
