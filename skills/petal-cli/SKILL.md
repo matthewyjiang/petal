@@ -9,6 +9,12 @@ Petal is a workspace-scoped Python dependency manager for ROS2. It discovers Pyt
 
 Use this skill whenever you need to work with Petal or `colcon deps`, including installing, configuring, running, troubleshooting, or automating the CLI.
 
+## Official Docs
+
+For complete and up-to-date documentation, see <https://matthewyjiang.github.io/petal/>.
+
+Use this skill as the fast path for common workflows and operational guidance. Consult the docs when command behavior, flags, install instructions, or troubleshooting details may have changed.
+
 ## Key Constraints
 
 - Petal is dependency management, not ROS node isolation. ROS2 uses one shared Python interpreter view.
