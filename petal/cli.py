@@ -234,6 +234,23 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0 if report.ok else 2
 
 
+def _skill_source() -> Path:
+    candidates: list[Path] = []
+    try:
+        dist = metadata.distribution("petal-ros")
+        candidates.append(Path(dist.locate_file("skills/petal-cli")))
+    except metadata.PackageNotFoundError:
+        pass
+    candidates.append(Path(__file__).resolve().parent.parent / "skills" / "petal-cli")
+
+    for candidate in candidates:
+        if (candidate / "SKILL.md").is_file():
+            return candidate
+    raise FileNotFoundError(
+        "could not locate the petal-cli agent skill; reinstall petal-ros"
+    )
+
+
 def _cmd_install_agent_skill(args: argparse.Namespace) -> int:
     target_root = (
         Path(args.target).expanduser()
@@ -241,28 +258,22 @@ def _cmd_install_agent_skill(args: argparse.Namespace) -> int:
         else Path.home() / ".agents" / "skills"
     )
     target = target_root / "petal-cli"
+    target_exists = target.exists() or target.is_symlink()
+
+    if target_exists and not args.force:
+        print(f"agent skill already installed: {target}")
+        print("use --force to replace it")
+        return 0
 
     try:
-        if target.exists() or target.is_symlink():
-            if not args.force:
-                print(f"agent skill already installed: {target}")
-                print("use --force to replace it")
-                return 0
+        source = _skill_source()
+        if target_exists:
             if target.is_dir() and not target.is_symlink():
                 shutil.rmtree(target)
             else:
                 target.unlink()
-
         target_root.mkdir(parents=True, exist_ok=True)
-        dist = metadata.distribution("petal-ros")
-        source = Path(dist.locate_file("skills/petal-cli"))
         shutil.copytree(source, target)
-    except metadata.PackageNotFoundError as exc:
-        print(
-            f"petal: failed to install agent skill (petal-ros not installed): {exc}",
-            file=sys.stderr,
-        )
-        return 1
     except OSError as exc:
         print(f"petal: failed to install agent skill: {exc}", file=sys.stderr)
         return 1
