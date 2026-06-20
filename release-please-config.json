@@ -3,7 +3,8 @@
   "packages": {
     ".": {
       "release-type": "python",
-      "package-name": "petal-ros"
+      "package-name": "petal-ros",
+      "changelog-path": "docs/changelog.md"
     }
   }
 }
