@@ -18,7 +18,7 @@ export default defineConfig({
     ],
     sidebar: [
       {
-        text: 'Start here',
+        text: 'Overview',
         items: [
           { text: 'Home', link: '/' },
           { text: 'Philosophy', link: '/philosophy' },
