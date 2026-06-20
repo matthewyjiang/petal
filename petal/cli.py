@@ -7,6 +7,11 @@ from concurrent.futures import ThreadPoolExecutor
 from importlib import metadata
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 only
+    import tomli as tomllib
+
 from petal import env, preflight
 from petal.config import (
     add_manifest_dep,
@@ -19,11 +24,12 @@ from petal.config import (
     write_manifest,
 )
 from petal.discover.workspace import discover_workspace
+from petal.identity import pip_name
 from petal.installer import InstallerError, execute, uninstall, write_lock
+from petal.models import Dep, Source
 from petal.planner import PlannerConflict, build_plan
 from petal.resolve.manager import ResolutionManager
 from petal.status import check_status, print_report
-from petal.models import Dep, Source
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
@@ -184,14 +190,29 @@ def _cmd_remove(args: argparse.Namespace) -> int:
     manifest = load_manifest(manifest_path)
     distro = manifest.ros_distro or env.detect_ros_distro()
     venv = env.ensure_venv(workspace, distro)
-    if not remove_manifest_dep(manifest_path, args.name):
+    if not _manifest_has_dep_key(manifest_path, args.name):
         print(f"{args.name} not present in petal.toml")
         return 0
 
     uninstall(args.name, venv, dry_run=args.dry_run)
-    if not args.dry_run:
-        _rewrite_lock(workspace, manifest_path, distro, venv)
+    if args.dry_run:
+        return 0
+
+    if not remove_manifest_dep(manifest_path, args.name):
+        raise InstallerError(
+            f"could not remove {args.name} from petal.toml; lock not rewritten"
+        )
+    _rewrite_lock(workspace, manifest_path, distro, venv)
     return 0
+
+
+def _manifest_has_dep_key(manifest_path: Path, name: str) -> bool:
+    data = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+    deps = data.get("deps", {}) or {}
+    if not isinstance(deps, dict):
+        return False
+    key = pip_name(name)
+    return any(pip_name(str(dep_name)) == key for dep_name in deps)
 
 
 def _dep_from_add_args(name: str, spec: str, source_hint: Source | None) -> Dep:

@@ -67,6 +67,26 @@ def test_status_uses_canonical_pip_identity_for_underscore_alias(
     assert report.in_sync == ["foo_bar"]
 
 
+def test_status_treats_malformed_pip_json_as_missing(tmp_path: Path) -> None:
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text('[workspace]\nros_distro = "humble"\n', encoding="utf-8")
+    write_lock(
+        tmp_path / "petal.lock",
+        manifest,
+        [ResolvedDep(Dep("rich"), Source.PIP, resolved_version="13.7.0")],
+    )
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[:3] == ["uv", "pip", "list"]:
+            return completed(cmd, "not json")
+        return completed(cmd, returncode=1)
+
+    report = check_status(tmp_path, tmp_path / ".petal" / "venv", runner)
+
+    assert not report.ok
+    assert report.missing == ["rich"]
+
+
 def test_status_reports_drift_missing_and_manifest_change(tmp_path: Path) -> None:
     ws = make_workspace(tmp_path)
     (ws / "petal.toml").write_text(

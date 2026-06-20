@@ -219,13 +219,15 @@ def activation_snippet(
     venv = venv_path(workspace_root)
     ros_setup = _ros_setup_for_shell(distro, shell)
 
-    lines = [
-        f'export VIRTUAL_ENV="{venv}"',
-        'export PATH="$VIRTUAL_ENV/bin:$PATH"',
-        "unset PYTHONHOME",
-    ]
+    lines = ["unset PYTHONHOME"]
     if ros_setup is not None:
         lines.append(f". {shlex.quote(str(ros_setup))}")
+    lines.extend(
+        [
+            f'export VIRTUAL_ENV="{venv}"',
+            'export PATH="$VIRTUAL_ENV/bin:$PATH"',
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 
