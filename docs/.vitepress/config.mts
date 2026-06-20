@@ -40,8 +40,13 @@ export default defineConfig({
         items: [
           { text: 'Agent skill', link: '/agent-skill' },
           { text: 'Development', link: '/development' },
-          { text: 'Attributions', link: '/attributions' },
           { text: 'Changelog', link: '/changelog' }
+        ]
+      },
+      {
+        text: 'Credits',
+        items: [
+          { text: 'Attributions', link: '/attributions' }
         ]
       }
     ],
