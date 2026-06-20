@@ -6,8 +6,11 @@ export default defineConfig({
   base: '/petal/',
   cleanUrls: true,
   lastUpdated: true,
+  head: [
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/petal/petal-icon.svg' }]
+  ],
   themeConfig: {
-    logo: '🌱',
+    logo: '/petal-icon.svg',
     siteTitle: 'Petal',
     nav: [
       { text: 'Philosophy', link: '/philosophy' },

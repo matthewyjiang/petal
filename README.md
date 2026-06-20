@@ -1,4 +1,4 @@
-# petal
+# 🌸 petal
 
 **[Read the documentation](https://matthewyjiang.github.io/petal/)**
 
