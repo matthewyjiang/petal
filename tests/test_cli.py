@@ -441,6 +441,36 @@ def test_add_apt_uses_spec_as_package(monkeypatch, tmp_path: Path) -> None:  # t
     assert rewrites["called"] is True
 
 
+def test_add_unresolvable_dep_errors_and_leaves_manifest(  # type: ignore[no-untyped-def]
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
+    before = '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\n'
+    (tmp_path / "petal.toml").write_text(before, encoding="utf-8")
+    venv = tmp_path / ".petal" / "venv"
+    monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
+
+    class FakeManager:
+        def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
+            pass
+
+        def resolve(self, dep: Dep) -> ResolvedDep | None:
+            return None
+
+    def _must_not_run(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("must not be called for an unresolvable dep")
+
+    monkeypatch.setattr(cli, "ResolutionManager", FakeManager)
+    monkeypatch.setattr(cli, "execute", _must_not_run)
+    monkeypatch.setattr(cli, "_rewrite_lock", _must_not_run)
+
+    rc = cli.main(["add", "nope-xyz123", "--workspace", str(tmp_path), "--yes"])
+
+    assert rc == 1
+    assert "could not resolve 'nope-xyz123'" in capsys.readouterr().err
+    assert (tmp_path / "petal.toml").read_text(encoding="utf-8") == before
+
+
 def test_add_no_and_dry_run_do_not_update_manifest(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
