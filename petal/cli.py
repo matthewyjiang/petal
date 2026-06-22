@@ -156,8 +156,14 @@ def _cmd_add(args: argparse.Namespace) -> int:
     source_hint = Source.PIP if args.pip else Source.APT if args.apt else None
     dep = _dep_from_add_args(args.name, args.spec or "", source_hint)
     manager = ResolutionManager(ros_distro=distro, venv=venv)
-    resolved = [item for item in [manager.resolve(dep)] if item]
-    plan = build_plan(resolved)
+    resolved = manager.resolve(dep)
+    if resolved is None:
+        print(
+            f"petal: could not resolve '{args.name}' from any source; not added",
+            file=sys.stderr,
+        )
+        return 1
+    plan = build_plan([resolved])
     proceeded = execute(
         plan,
         venv,
