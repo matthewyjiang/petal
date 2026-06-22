@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/matthewyjiang/petal/compare/v0.2.4...v0.2.5) (2026-06-22)
+
+
+### Bug Fixes
+
+* do not add unresolvable dependencies to petal.toml ([#29](https://github.com/matthewyjiang/petal/issues/29)) ([6ed7cfd](https://github.com/matthewyjiang/petal/commit/6ed7cfd7ed7cc054e2434452eae5f564d58cc38d))
+
 ## [0.2.4](https://github.com/matthewyjiang/petal/compare/v0.2.3...v0.2.4) (2026-06-20)
 
 
