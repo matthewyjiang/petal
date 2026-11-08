@@ -358,21 +358,36 @@ def test_spec_conflicts_are_reported_with_origins_before_pinning(
         manager_for(tmp_path, system(), _no_commands).resolve_all(deps)
 
 
-def test_lock_mismatch_checks_what_the_lock_relied_on() -> None:
+def test_lock_mismatch_checks_what_each_entry_relied_on() -> None:
     locked = [
-        ResolvedDep(Dep("numpy"), Source.DISTRO, resolved_version="1.24.2"),
-        ResolvedDep(Dep("rich"), Source.PIP, resolved_version="13.7.0"),
+        ResolvedDep(Dep("numpy", ">=1.20", Source.PIP), Source.DISTRO),
+        # From a rosdep `pip:` rule: the entry has the PyPI name, not the key.
+        ResolvedDep(Dep("rich", "", Source.PIP), Source.PIP, resolved_version="13.7.0"),
     ]
-    deps = [Dep("numpy", ">=1.20", Source.PIP), Dep("rich", "", Source.PIP)]
 
     # A newer system numpy that still satisfies the spec keeps the lock valid.
-    assert lock_mismatch(locked, deps, system({"numpy": "1.26.4"})) == ""
-    assert "which has 1.19.5" in lock_mismatch(
-        locked, deps, system({"numpy": "1.19.5"})
-    )
-    assert "does not provide it" in lock_mismatch(locked, deps, system())
+    assert lock_mismatch(locked, system({"numpy": "1.26.4"})) == ""
+    assert "which has 1.19.5" in lock_mismatch(locked, system({"numpy": "1.19.5"}))
+    assert "does not provide it" in lock_mismatch(locked, system())
+    assert lock_mismatch(locked, system(), check_distro=False) == ""
     assert "the system now provides 13.9.4" in lock_mismatch(
-        locked, deps, system({"numpy": "1.24.2", "rich": "13.9.4"})
+        locked, system({"numpy": "1.24.2", "rich": "13.9.4"}), check_distro=False
+    )
+
+
+def test_reselect_python_keeps_apt_choices(tmp_path: Path) -> None:
+    deb = ResolvedDep(Dep("scipy"), Source.APT, apt_pkg="python3-scipy")
+    mdurl = ResolvedDep(Dep("mdurl", "", Source.PIP), Source.PIP, "0.1.2")
+    manager = manager_for(
+        tmp_path, system({"scipy": "1.8.0", "mdurl": "0.1.2"}), _no_commands
+    )
+
+    kept, now_system = manager.reselect_python([deb, mdurl])
+
+    assert kept == deb
+    assert (now_system.chosen_source, now_system.resolved_version) == (
+        Source.DISTRO,
+        "0.1.2",
     )
 
 

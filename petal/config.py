@@ -94,7 +94,8 @@ def manifest_hash(path: Path) -> str:
 # were resolved under the old rules. 2: rosdep keys no longer fall back to PyPI.
 # 3: Python requirements the ROS/system Python provides resolve to distro.
 # 4: the lock's dependency_hash covers the input deps, not the resolved ones.
-_RESOLUTION_POLICY = "4"
+# 5: lock entries record their declared spec and hint.
+_RESOLUTION_POLICY = "5"
 
 
 def dependency_hash(deps: list[Dep]) -> str:
@@ -236,7 +237,12 @@ def load_lock(path: Path) -> Lock:
     resolved: list[ResolvedDep] = []
     for item in data.get("resolved", []) or []:
         source = Source(str(item["source"]))
-        dep = Dep(name=str(item["name"]))
+        hint = str(item.get("hint", ""))
+        dep = Dep(
+            name=str(item["name"]),
+            version_spec=str(item.get("spec", "")),
+            source_hint=Source(hint) if hint else None,
+        )
         resolved.append(
             ResolvedDep(
                 dep=dep,

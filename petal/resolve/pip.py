@@ -31,7 +31,7 @@ def compile_requirements(
     venv: Path,
     system: SystemView,
     runner: Runner,
-    preferences: dict[str, str] | None = None,
+    preferences: dict[str, str],
 ) -> list[Pin]:
     """Resolve requirements and their whole dependency closure.
 
@@ -43,7 +43,7 @@ def compile_requirements(
         # uv treats an existing output file as version preferences.
         output = Path(tmp) / "pins.txt"
         output.write_text(
-            "".join(f"{n}=={v}\n" for n, v in sorted((preferences or {}).items()) if v),
+            "".join(f"{n}=={v}\n" for n, v in sorted(preferences.items()) if v),
             encoding="utf-8",
         )
         cmd = [

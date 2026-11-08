@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from petal.config import load_lock, manifest_hash
 from petal.identity import pip_name
-from petal.models import Dep, Source
+from petal.models import Source
 from petal.resolve.base import Runner, default_runner, venv_python
 from petal.resolve.distro import DistroResolver
 from petal.resolve.pip import venv_versions
@@ -27,10 +28,13 @@ class StatusReport:
 def check_status(
     workspace_root: Path,
     venv: Path,
-    system: SystemView,
+    load_system: Callable[[], SystemView],
     runner: Runner = default_runner,
 ) -> StatusReport:
-    """Compare petal.lock with what the venv and the ROS/system Python provide."""
+    """Compare petal.lock with what the venv and the ROS/system Python provide.
+
+    The system is inspected only if the lock has entries it provides.
+    """
     lock_path = workspace_root / "petal.lock"
     manifest_path = workspace_root / "petal.toml"
     report = StatusReport()
@@ -43,6 +47,7 @@ def check_status(
         report.manifest_changed = True
 
     pip_versions: dict[str, str] | None = None
+    distro: DistroResolver | None = None
     for item in lock.resolved:
         name = item.dep.name
         if item.chosen_source == Source.APT:
@@ -61,7 +66,8 @@ def check_status(
         elif item.chosen_source == Source.DISTRO:
             # Same view of the system as resolution, independent of whether
             # this shell sourced ROS. The locked version is informational.
-            if DistroResolver(system).resolve(Dep(name)):
+            distro = distro or DistroResolver(load_system())
+            if distro.resolve(item.dep):
                 report.in_sync.append(name)
             else:
                 report.missing.append(name)

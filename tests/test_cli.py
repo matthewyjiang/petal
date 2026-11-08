@@ -245,7 +245,7 @@ def test_sync_reresolves_when_system_now_provides_a_locked_pip_dep(
     assert resolved_names == ["rich"]
 
 
-def _frozen_workspace(monkeypatch, tmp_path: Path, manifest_deps: str, lock_deps):  # type: ignore[no-untyped-def]
+def _frozen_workspace(monkeypatch, tmp_path: Path, manifest_deps: str, locked=None):  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     manifest = tmp_path / "petal.toml"
     manifest.write_text(
@@ -255,7 +255,7 @@ def _frozen_workspace(monkeypatch, tmp_path: Path, manifest_deps: str, lock_deps
     write_lock(
         tmp_path / "petal.lock",
         lock_stamp(manifest, [Dep("rich", ">=13")]),
-        [ResolvedDep(Dep("rich"), Source.PIP, resolved_version="13.7.0")],
+        locked or [ResolvedDep(Dep("rich"), Source.PIP, resolved_version="13.7.0")],
     )
     monkeypatch.setattr(
         env, "ensure_venv", lambda workspace, distro: tmp_path / ".petal" / "venv"
@@ -274,7 +274,7 @@ def _frozen_workspace(monkeypatch, tmp_path: Path, manifest_deps: str, lock_deps
 def test_frozen_installs_the_lock_without_rewriting_it(
     monkeypatch, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
-    _frozen_workspace(monkeypatch, tmp_path, 'rich = ">=13"\n', None)
+    _frozen_workspace(monkeypatch, tmp_path, 'rich = ">=13"\n')
     executed = {}
 
     def fake_execute(plan, got_venv, **kwargs):  # type: ignore[no-untyped-def]
@@ -289,7 +289,7 @@ def test_frozen_installs_the_lock_without_rewriting_it(
 
 
 def test_frozen_fails_when_inputs_changed(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
-    _frozen_workspace(monkeypatch, tmp_path, 'rich = ">=14"\n', None)
+    _frozen_workspace(monkeypatch, tmp_path, 'rich = ">=14"\n')
 
     assert cli.main(["sync", "--frozen", "--workspace", str(tmp_path)]) == 1
     assert "out of date with petal.toml" in capsys.readouterr().err
@@ -298,7 +298,7 @@ def test_frozen_fails_when_inputs_changed(monkeypatch, tmp_path: Path, capsys) -
 def test_frozen_fails_when_lock_does_not_fit_the_system(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:  # type: ignore[no-untyped-def]
-    _frozen_workspace(monkeypatch, tmp_path, 'rich = ">=13"\n', None)
+    _frozen_workspace(monkeypatch, tmp_path, 'rich = ">=13"\n')
     monkeypatch.setattr(
         cli, "inspect_system_python", lambda distro: SystemPython({"rich": "13.9.4"})
     )
@@ -307,6 +307,33 @@ def test_frozen_fails_when_lock_does_not_fit_the_system(
     err = capsys.readouterr().err
     assert "does not fit this system" in err
     assert "the system now provides 13.9.4" in err
+
+
+def test_frozen_on_a_fresh_machine_checks_system_deps_after_apt(
+    monkeypatch, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    # The lock's own apt entry provides mdurl; this machine has neither yet.
+    _frozen_workspace(
+        monkeypatch,
+        tmp_path,
+        'rich = ">=13"\n',
+        [
+            ResolvedDep(Dep("python3-mdurl"), Source.APT, apt_pkg="python3-mdurl"),
+            ResolvedDep(Dep("mdurl", "", Source.PIP), Source.DISTRO),
+        ],
+    )
+    executed = {}
+
+    def fake_execute(plan, got_venv, **kwargs):  # type: ignore[no-untyped-def]
+        executed.update(kwargs)
+        return True
+
+    monkeypatch.setattr(cli, "execute", fake_execute)
+
+    assert cli.main(["sync", "--frozen", "--workspace", str(tmp_path)]) == 0
+    # execute() runs this after apt; with mdurl still absent it must refuse.
+    with pytest.raises(InstallerError, match="mdurl is locked to the system"):
+        executed["verify"]()
 
 
 def test_sync_yes_and_no_flags_pass_prompt_overrides(
@@ -465,7 +492,9 @@ def test_status_exit_code_2_on_drift(monkeypatch, tmp_path: Path) -> None:  # ty
     )
     (tmp_path / ".petal" / "venv").mkdir(parents=True)
     monkeypatch.setattr(
-        cli, "check_status", lambda workspace, venv, system: SimpleNamespace(ok=False)
+        cli,
+        "check_status",
+        lambda workspace, venv, load_system: SimpleNamespace(ok=False),
     )
     printed = {}
     monkeypatch.setattr(

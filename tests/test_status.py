@@ -47,7 +47,9 @@ def test_status_reports_in_sync(tmp_path: Path) -> None:
             return completed(cmd, '[{"name":"rich","version":"13.7.0"}]')
         return completed(cmd, returncode=1)
 
-    report = check_status(ws, ws / ".petal" / "venv", view(modules={"rclpy"}), runner)
+    report = check_status(
+        ws, ws / ".petal" / "venv", lambda: view(modules={"rclpy"}), runner
+    )
     assert report.ok
     assert report.in_sync == ["numpy", "rich", "rclpy"]
 
@@ -68,7 +70,9 @@ def test_status_uses_canonical_pip_identity_for_underscore_alias(
             return completed(cmd, '[{"name":"foo-bar","version":"1.0"}]')
         return completed(cmd, returncode=1)
 
-    report = check_status(tmp_path, tmp_path / ".petal" / "venv", NO_SYSTEM, runner)
+    report = check_status(
+        tmp_path, tmp_path / ".petal" / "venv", lambda: NO_SYSTEM, runner
+    )
 
     assert report.ok
     assert report.in_sync == ["foo_bar"]
@@ -88,7 +92,9 @@ def test_status_treats_malformed_pip_json_as_missing(tmp_path: Path) -> None:
             return completed(cmd, "not json")
         return completed(cmd, returncode=1)
 
-    report = check_status(tmp_path, tmp_path / ".petal" / "venv", NO_SYSTEM, runner)
+    report = check_status(
+        tmp_path, tmp_path / ".petal" / "venv", lambda: NO_SYSTEM, runner
+    )
 
     assert not report.ok
     assert report.missing == ["rich"]
@@ -107,7 +113,7 @@ def test_status_reports_drift_missing_and_manifest_change(tmp_path: Path) -> Non
             return completed(cmd, "[]")
         return completed(cmd, returncode=1)
 
-    report = check_status(ws, ws / ".petal" / "venv", NO_SYSTEM, runner)
+    report = check_status(ws, ws / ".petal" / "venv", lambda: NO_SYSTEM, runner)
     assert not report.ok
     assert report.manifest_changed
     assert report.drifted == ["numpy (1.25 != 1.24)"]
@@ -128,7 +134,9 @@ def test_status_accepts_importable_apt_python_dep_when_dpkg_missing(
             return completed(cmd)
         return completed(cmd, returncode=1)
 
-    report = check_status(ws, ws / ".petal" / "venv", view(modules={"rclpy"}), runner)
+    report = check_status(
+        ws, ws / ".petal" / "venv", lambda: view(modules={"rclpy"}), runner
+    )
 
     assert report.ok
     assert report.in_sync == ["numpy", "rich", "rclpy"]
@@ -148,7 +156,7 @@ def test_status_uses_known_import_name_for_distro_dep(tmp_path: Path) -> None:
         raise AssertionError(f"system packages come from the system view: {cmd}")
 
     report = check_status(
-        tmp_path, tmp_path / ".petal" / "venv", view(modules={"yaml"}), runner
+        tmp_path, tmp_path / ".petal" / "venv", lambda: view(modules={"yaml"}), runner
     )
 
     assert report.ok
@@ -159,7 +167,7 @@ def test_print_report_ok_is_concise(capsys) -> None:  # type: ignore[no-untyped-
     ws_report = check_status(
         Path("/does/not/exist"),
         Path("/venv"),
-        NO_SYSTEM,
+        lambda: NO_SYSTEM,
         lambda cmd, **kwargs: completed(cmd),
     )
     ws_report.missing.clear()
@@ -174,7 +182,7 @@ def test_print_report_issues_are_bulleted(capsys) -> None:  # type: ignore[no-un
     ws_report = check_status(
         Path("/does/not/exist"),
         Path("/venv"),
-        NO_SYSTEM,
+        lambda: NO_SYSTEM,
         lambda cmd, **kwargs: completed(cmd),
     )
     print_report(ws_report)
@@ -193,6 +201,8 @@ def test_status_accepts_system_updates_of_distro_packages(tmp_path: Path) -> Non
     )
 
     system = view({"python-dateutil": "2.9.0"})
-    report = check_status(tmp_path, tmp_path / ".petal" / "venv", system, completed)
+    report = check_status(
+        tmp_path, tmp_path / ".petal" / "venv", lambda: system, completed
+    )
 
     assert report.in_sync == ["python-dateutil"]

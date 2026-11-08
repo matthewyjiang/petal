@@ -99,19 +99,25 @@ def _load_inputs(workspace: Path, manifest_path: Path, distro: str) -> _Inputs:
     return _Inputs(deps, system, lock_stamp(manifest_path, deps))
 
 
-def _workspace_plan(
+def _manager(
     inputs: _Inputs, distro: str, venv: Path, lock: Lock | None
-) -> Plan:
-    """Resolve the whole workspace; raises before anything is installed."""
+) -> ResolutionManager:
+    """Resolver for the workspace that keeps locked PyPI versions when it can."""
     locked = {
         pip_name(item.dep.name): item.resolved_version
         for item in (lock.resolved if lock else [])
         if item.chosen_source == Source.PIP
     }
-    manager = ResolutionManager(
+    return ResolutionManager(
         ros_distro=distro, venv=venv, system=inputs.system, locked=locked
     )
-    return build_plan(manager.resolve_all(inputs.deps))
+
+
+def _workspace_plan(
+    inputs: _Inputs, distro: str, venv: Path, lock: Lock | None
+) -> Plan:
+    """Resolve the whole workspace; raises before anything is installed."""
+    return build_plan(_manager(inputs, distro, venv, lock).resolve_all(inputs.deps))
 
 
 def _sync(
@@ -127,18 +133,18 @@ def _sync(
 ) -> bool:
     """Bring the venv and petal.lock in line with petal.toml and the workspace.
 
-    `frozen` installs exactly what petal.lock records and never rewrites it.
-    Otherwise the lock is reused only while its inputs are unchanged and it
-    still fits this system; anything else resolves the workspace again.
+    `frozen` installs what petal.lock records and never rewrites it. Otherwise
+    the lock is reused only while its inputs are unchanged and it still fits
+    this system; anything else resolves the workspace again.
     """
     manifest_path = workspace / "petal.toml"
     lock_path = workspace / "petal.lock"
     inputs = _load_inputs(workspace, manifest_path, distro)
     lock = load_lock_or_none(lock_path)
-    mismatch = lock_mismatch(lock.resolved, inputs.deps, inputs.system) if lock else ""
 
-    def replan() -> Plan:
-        return _workspace_plan(inputs, distro, venv, lock)
+    def replan(plan: Plan) -> Plan:
+        manager = _manager(inputs, distro, venv, lock)
+        return build_plan(manager.reselect_python(plan.items()))
 
     if frozen:
         if lock is None:
@@ -148,20 +154,32 @@ def _sync(
                 "petal.lock is out of date with petal.toml or the workspace; "
                 "run `petal sync`"
             )
-        if mismatch:
-            raise InstallerError(f"petal.lock does not fit this system: {mismatch}")
+        frozen_lock = lock
+
+        def verify(*, check_distro: bool = True) -> None:
+            # System packages the lock relies on may arrive with its own apt
+            # entries, so execute() checks them once apt is done.
+            reason = lock_mismatch(
+                frozen_lock.resolved, inputs.system, check_distro=check_distro
+            )
+            if reason:
+                raise InstallerError(f"petal.lock does not fit this system: {reason}")
+
+        verify(check_distro=False)
         return execute(
             build_plan(lock.resolved),
             venv,
             system=inputs.system,
             dry_run=dry_run,
             assume_yes=True,
+            verify=verify,
         )
 
-    if reuse_lock and lock and lock.stamp == inputs.stamp and not mismatch:
+    fits = lock is not None and not lock_mismatch(lock.resolved, inputs.system)
+    if reuse_lock and lock and lock.stamp == inputs.stamp and fits:
         plan = build_plan(lock.resolved)
     else:
-        plan = replan()
+        plan = _workspace_plan(inputs, distro, venv, lock)
     return execute(
         plan,
         venv,
@@ -312,8 +330,13 @@ def _cmd_status(args: argparse.Namespace) -> int:
     venv = env.venv_path(workspace)
     if not venv.exists():
         venv = env.ensure_venv(workspace, distro)
-    system = SystemView(lambda: inspect_system_python(distro), constraints_path=None)
-    report = check_status(workspace, venv, system)
+    report = check_status(
+        workspace,
+        venv,
+        lambda: SystemView(
+            lambda: inspect_system_python(distro), constraints_path=None
+        ),
+    )
     print_report(report)
     return 0 if report.ok else 2
 

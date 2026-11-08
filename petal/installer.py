@@ -33,7 +33,8 @@ def execute(
     dry_run: bool = False,
     lock_path: Path | None = None,
     stamp: LockStamp | None = None,
-    replan: Callable[[], Plan] | None = None,
+    replan: Callable[[Plan], Plan] | None = None,
+    verify: Callable[[], None] | None = None,
     runner: Runner = default_runner,
     install_runner: StreamRunner = default_stream_runner,
     assume_yes: bool = False,
@@ -45,8 +46,10 @@ def execute(
     skipping anything the ROS/system Python provides, so the venv never holds a
     copy that shadows a system package (unless the user explicitly allowed it).
     The closure is resolved before anything is installed. If apt changes what
-    the system provides, `replan` resolves the workspace again before pip runs.
-    Returns False when nothing was applied (dry run or cancelled).
+    the system provides, `replan` revises the plan before pip runs. `verify`
+    raises if the plan does not fit the system; it runs once the system is
+    final, before the prompt when apt has nothing to install. Returns False
+    when nothing was applied (dry run or cancelled).
     """
     for warning in plan.warnings:
         print(f"warning: {warning}")
@@ -62,6 +65,8 @@ def execute(
 
     _warn_shadowing(installed, system)
     missing_apt = [pkg for pkg in apt_pkgs if not _apt_installed(pkg, runner)]
+    if verify and not missing_apt:
+        verify()
 
     if not missing_apt and not pins:
         print(
@@ -91,11 +96,14 @@ def execute(
             raise
         if proc.returncode != 0:
             raise InstallerError(proc.stderr or "apt install failed")
-        if system.refresh():
+        changed = system.refresh()
+        if verify:
+            verify()
+        if changed:
             # New debs changed what the system provides, e.g. python3-scipy now
             # satisfies a `scipy` requirement that was headed for PyPI.
             if replan is not None:
-                plan = replan()
+                plan = replan(plan)
             pins = _pins_to_install(plan, venv, system, runner, installed)
     elif apt_pkgs:
         print("APT: already installed " + ", ".join(apt_pkgs))
@@ -108,8 +116,7 @@ def execute(
             raise InstallerError(proc.stderr or "pip install failed")
 
     if lock_path and stamp:
-        write_lock(lock_path, stamp, plan.items())
-        print(f"lock: wrote {lock_path}")
+        _write_lock_if_changed(lock_path, stamp, plan.items())
 
     return True
 
@@ -139,22 +146,26 @@ def _write_lock_if_changed(
 def _lock_matches(
     lock_path: Path, stamp: LockStamp, resolved: list[ResolvedDep]
 ) -> bool:
+    """True when writing `resolved` would not change petal.lock's content."""
     lock = load_lock_or_none(lock_path)
     if lock is None or lock.stamp != stamp:
         return False
-    locked = {_frozen_key(item): item for item in lock.resolved}
-    planned = {_frozen_key(item): item for item in resolved}
-    if locked.keys() != planned.keys():
-        return False
-    for key, item in planned.items():
-        locked_item = locked[key]
-        if item.chosen_source != locked_item.chosen_source:
-            return False
-        if item.apt_pkg != locked_item.apt_pkg:
-            return False
-        if item.resolved_version != locked_item.resolved_version:
-            return False
-    return True
+
+    def entry(item: ResolvedDep) -> tuple[object, ...]:
+        version = "" if item.chosen_source == Source.DISTRO else item.resolved_version
+        dep = item.dep
+        return (
+            lock_key(item),
+            item.chosen_source,
+            item.apt_pkg,
+            version,
+            dep.version_spec,
+            dep.source_hint,
+        )
+
+    return sorted(map(entry, lock.resolved), key=repr) == sorted(
+        map(entry, resolved), key=repr
+    )
 
 
 def uninstall(
@@ -180,14 +191,20 @@ def uninstall(
 
 
 def _lock_entry(item: ResolvedDep) -> list[str]:
+    """One `[[resolved]]` table. System entries carry no version so the lock does
+    not change with whichever machine resolved it."""
     lines = [
         "[[resolved]]",
         f'name = "{item.dep.name}"',
         f'source = "{item.chosen_source.value}"',
     ]
+    if item.dep.version_spec:
+        lines.append(f'spec = "{item.dep.version_spec}"')
+    if item.dep.source_hint:
+        lines.append(f'hint = "{item.dep.source_hint.value}"')
     if item.apt_pkg:
         lines.append(f'apt_pkg = "{item.apt_pkg}"')
-    if item.resolved_version:
+    if item.resolved_version and item.chosen_source != Source.DISTRO:
         lines.append(f'version = "{item.resolved_version}"')
     lines.append("")
     return lines
@@ -331,7 +348,3 @@ def _print_dry_run(
 def _apt_installed(pkg: str, runner: Runner) -> bool:
     proc = runner(["dpkg-query", "-W", "-f=${Status}", pkg])
     return proc.returncode == 0 and "install ok installed" in proc.stdout
-
-
-def _frozen_key(item: ResolvedDep) -> str:
-    return lock_key(item)

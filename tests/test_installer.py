@@ -366,7 +366,7 @@ def test_execute_replans_when_apt_changes_the_system(tmp_path: Path) -> None:  #
         system=system,
         lock_path=tmp_path / "petal.lock",
         stamp=lock_stamp(manifest, []),
-        replan=lambda: replanned,
+        replan=lambda plan: replanned,
     )
 
     assert calls[-1] == install_cmd(tmp_path, "rich==13.7.0", "pygments==2.18.0")
@@ -394,3 +394,47 @@ def test_execute_noop_rewrites_lock_when_stamp_changes(tmp_path: Path, capsys) -
         tmp_path / "petal.lock"
     ).read_text(encoding="utf-8")
     assert "lock: wrote" in capsys.readouterr().out
+
+
+def test_execute_verifies_after_apt_when_debs_are_pending(tmp_path: Path) -> None:
+    events: list[str] = []
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[:2] == ["dpkg-query", "-W"]:
+            return completed(cmd, returncode=1)
+        if cmd[:2] == ["sudo", "apt-get"]:
+            events.append("apt")
+        return completed(cmd)
+
+    assert execute(
+        Plan(apt=[apt_dep()]),
+        tmp_path / "venv",
+        runner=runner,
+        install_runner=runner,
+        assume_yes=True,
+        verify=lambda: events.append("verify"),
+    )
+
+    assert events == ["apt", "verify"]
+
+
+def test_execute_verifies_before_prompting_when_nothing_needs_apt(
+    tmp_path: Path,
+) -> None:
+    def verify() -> None:
+        raise InstallerError("petal.lock does not fit this system")
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[:3] in (["uv", "pip", "list"], ["uv", "pip", "compile"]):
+            return fake_uv(cmd, **kwargs)
+        raise AssertionError(f"nothing may be installed: {cmd}")
+
+    with pytest.raises(InstallerError, match="does not fit"):
+        execute(
+            Plan(pip=[pip_dep()]),
+            tmp_path / "venv",
+            runner=runner,
+            install_runner=runner,
+            assume_yes=True,
+            verify=verify,
+        )

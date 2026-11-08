@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from petal.identity import dep_key, lock_key, pip_name
+from petal.identity import pip_name
 from petal.models import Dep, ResolvedDep, Source
 from petal.planner import PlannerConflict, check_version_conflicts
 from petal.resolve.apt import AptResolver
@@ -91,6 +91,22 @@ class ResolutionManager:
         check_version_conflicts(resolved)
         return self._pin_pypi(resolved)
 
+    def reselect_python(self, resolved: list[ResolvedDep]) -> list[ResolvedDep]:
+        """Re-check PyPI choices against a changed system; keep apt/distro ones.
+
+        Used after apt installed debs: a requirement headed for PyPI may now be
+        provided by the system. Apt choices stay, so the lock still records the
+        debs a fresh machine needs.
+        """
+        outcomes = [
+            self._select_python(item.dep) if item.chosen_source == Source.PIP else item
+            for item in resolved
+        ]
+        failures = [item for item in outcomes if isinstance(item, Unresolved)]
+        if failures:
+            raise UnresolvedDependencies(failures)
+        return self._pin_pypi([i for i in outcomes if isinstance(i, ResolvedDep)])
+
     # Changing these chains? Bump config._RESOLUTION_POLICY.
     def _select(self, dep: Dep) -> ResolvedDep | Unresolved:
         hint = dep.source_hint
@@ -173,30 +189,32 @@ class ResolutionManager:
 
 
 def lock_mismatch(
-    locked: list[ResolvedDep], deps: list[Dep], system: SystemView
+    locked: list[ResolvedDep], system: SystemView, *, check_distro: bool = True
 ) -> str:
     """Why a lock no longer fits this system, or "" when it still does.
 
-    Checks the facts the lock relied on instead of comparing whole-system
-    snapshots, so a committed lock stays valid on any machine that provides
-    what it needs. Only declared deps are checked; locked PyPI pins are still
-    resolved against the system constraints when installed.
+    Checks the facts each entry relied on (entries carry their declared spec
+    and hint) instead of comparing whole-system snapshots, so a committed lock
+    stays valid on any machine that provides what it needs. `check_distro=False`
+    skips "the system provides it", for use before apt has installed the debs
+    the lock asks for.
     """
-    entries = {lock_key(item): item for item in locked}
     distro = DistroResolver(system)
-    for dep in deps:
-        entry = entries.get(dep_key(dep))
-        if entry is None:
-            continue
-        if entry.chosen_source == Source.DISTRO and not distro.resolve(dep):
+    for item in locked:
+        dep = item.dep
+        if item.chosen_source == Source.PIP and system.protects(dep.name):
+            return (
+                f"{dep.name} is locked to PyPI, but the system now provides "
+                f"{system.version(dep.name)}"
+            )
+        if (
+            check_distro
+            and item.chosen_source == Source.DISTRO
+            and not distro.resolve(dep)
+        ):
             version = system.version(dep.name)
             found = f"has {version}" if version else "does not provide it"
             return (
                 f"{dep.name}{dep.version_spec} is locked to the system, which {found}"
-            )
-        if entry.chosen_source == Source.PIP and system.protects(dep.name):
-            return (
-                f"{dep.name} is locked to PyPI, but the system now provides "
-                f"{system.version(dep.name)}"
             )
     return ""
