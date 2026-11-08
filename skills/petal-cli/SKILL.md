@@ -79,7 +79,7 @@ petal sync              # resolve, install, write petal.lock
 petal sync --yes        # skip install prompt
 petal sync --no         # show plan, install nothing
 petal sync --dry-run    # show commands, install nothing
-petal sync --frozen     # install petal.lock as recorded; fail if stale
+petal sync --frozen     # install exactly petal.lock; fail if stale
 petal status            # report drift; exits 2 on drift/missing/change
 petal activate          # print a line that sources .petal/activate (ROS + venv)
                          # bash/zsh: source <(petal activate)

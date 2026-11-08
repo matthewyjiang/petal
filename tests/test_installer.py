@@ -25,20 +25,9 @@ def execute(*args, **kwargs):  # type: ignore[no-untyped-def]
 
 
 def fake_uv(cmd, **kwargs):  # type: ignore[no-untyped-def]
-    """Empty venv for `uv pip list`, `compiled` for `uv pip compile`."""
-    if cmd[:3] == ["uv", "pip", "list"]:
-        return completed(cmd, "[]")
-    return compiled(cmd, kwargs)
-
-
-def compiled(cmd: list[str], kwargs: dict) -> subprocess.CompletedProcess[str]:
-    """Fake `uv pip compile`: pins each stdin requirement plus pygments for rich."""
-    lines = kwargs["input"].split()
-    if any(line.startswith("rich") for line in lines):
-        lines.append("pygments==2.18.0")
-    output = Path(cmd[cmd.index("--output-file") + 1])
-    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return completed(cmd)
+    """An empty venv; installing never resolves, so nothing else may run."""
+    assert cmd[:3] == ["uv", "pip", "list"], f"must not run {cmd}"
+    return completed(cmd, "[]")
 
 
 def install_cmd(tmp_path: Path, *reqs: str) -> list[str]:
@@ -56,8 +45,12 @@ def pip_dep(name: str = "rich") -> ResolvedDep:
     return ResolvedDep(Dep(name, ">=13"), Source.PIP, resolved_version="13.7.0")
 
 
+# rich's dependency, pinned by the resolver alongside it.
+PYGMENTS = ResolvedDep(Dep("pygments"), Source.PIP, "2.18.0", transitive=True)
+
+
 def test_execute_dry_run_prints_commands(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
-    plan = Plan(apt=[apt_dep()], pip=[pip_dep()])
+    plan = Plan(apt=[apt_dep()], pip=[pip_dep(), PYGMENTS])
     assert execute(plan, tmp_path / "venv", dry_run=True, runner=fake_uv) is False
 
     out = capsys.readouterr().out
@@ -78,13 +71,11 @@ def test_execute_installs_missing_apt_and_pip_then_writes_lock(
             return completed(cmd, returncode=1)
         if cmd[:3] == ["uv", "pip", "list"]:
             return completed(cmd, "[]")
-        if cmd[:3] == ["uv", "pip", "compile"]:
-            return compiled(cmd, kwargs)
         return completed(cmd)
 
     assert (
         execute(
-            Plan(apt=[apt_dep()], pip=[pip_dep()]),
+            Plan(apt=[apt_dep()], pip=[pip_dep(), PYGMENTS]),
             tmp_path / "venv",
             lock_path=tmp_path / "petal.lock",
             stamp=lock_stamp(manifest, []),
@@ -104,6 +95,10 @@ def test_execute_installs_missing_apt_and_pip_then_writes_lock(
     assert 'apt_pkg = "python3-numpy"' in lock
     assert 'name = "rich"' in lock
     assert 'version = "13.7.0"' in lock
+    assert (
+        'name = "pygments"\nsource = "pip"\nversion = "2.18.0"\ntransitive = true'
+        in lock
+    )
     out = capsys.readouterr().out
     assert "APT: installing python3-numpy" in out
     assert "PIP: installing rich==13.7.0, pygments==2.18.0" in out
@@ -154,7 +149,7 @@ def test_execute_no_prompt_skips_install(tmp_path: Path, capsys) -> None:  # typ
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
         if cmd[:2] == ["dpkg-query", "-W"]:
             return completed(cmd, returncode=1)
-        if cmd[:3] in (["uv", "pip", "list"], ["uv", "pip", "compile"]):
+        if cmd[:3] == ["uv", "pip", "list"]:
             return fake_uv(cmd, **kwargs)
         calls.append(cmd)
         return completed(cmd)
@@ -294,13 +289,10 @@ def test_execute_never_installs_system_provided_packages(
         if cmd[:3] == ["uv", "pip", "list"]:
             # A copy left behind by an older petal that shadows the system one.
             return completed(cmd, '[{"name":"PyYAML","version":"6.0.2"}]')
-        if cmd[:3] == ["uv", "pip", "compile"]:
-            assert cmd[cmd.index("--constraints") + 1] == str(constraints)
-            return compiled(cmd, kwargs)
         return completed(cmd)
 
     assert execute(
-        Plan(pip=[pip_dep()]),
+        Plan(pip=[pip_dep(), PYGMENTS]),
         tmp_path / "venv",
         runner=runner,
         install_runner=runner,
@@ -315,26 +307,6 @@ def test_execute_never_installs_system_provided_packages(
     assert "pyyaml 6.0.2, shadowing the system's 6.0.1" in out
 
 
-def test_execute_reports_unresolvable_pip_closure(tmp_path: Path) -> None:
-    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
-        if cmd[:3] == ["uv", "pip", "list"]:
-            return completed(cmd, "[]")
-        if cmd[:3] == ["uv", "pip", "compile"]:
-            return subprocess.CompletedProcess(
-                cmd, 1, stdout="", stderr="numpy>=2 and numpy==1.24.2 conflict"
-            )
-        raise AssertionError(f"must not run {cmd}")
-
-    with pytest.raises(InstallerError, match="numpy>=2 and numpy==1.24.2"):
-        execute(
-            Plan(pip=[pip_dep()]),
-            tmp_path / "venv",
-            runner=runner,
-            install_runner=runner,
-            assume_yes=True,
-        )
-
-
 def test_execute_replans_when_apt_changes_the_system(tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     manifest = tmp_path / "petal.toml"
     manifest.write_text("[deps]\n", encoding="utf-8")
@@ -344,7 +316,7 @@ def test_execute_replans_when_apt_changes_the_system(tmp_path: Path) -> None:  #
     pyyaml = ResolvedDep(Dep("pyyaml"), Source.PIP, resolved_version="6.0.2")
     replanned = Plan(
         apt=[apt_dep()],
-        pip=[pip_dep()],
+        pip=[pip_dep(), PYGMENTS],
         distro=[ResolvedDep(Dep("pyyaml"), Source.DISTRO, resolved_version="6.0.1")],
     )
     calls: list[list[str]] = []
@@ -353,12 +325,12 @@ def test_execute_replans_when_apt_changes_the_system(tmp_path: Path) -> None:  #
         calls.append(cmd)
         if cmd[:2] == ["dpkg-query", "-W"]:
             return completed(cmd, returncode=1)
-        if cmd[:3] in (["uv", "pip", "list"], ["uv", "pip", "compile"]):
+        if cmd[:3] == ["uv", "pip", "list"]:
             return fake_uv(cmd, **kwargs)
         return completed(cmd)
 
     assert execute(
-        Plan(apt=[apt_dep()], pip=[pip_dep(), pyyaml]),
+        Plan(apt=[apt_dep()], pip=[pip_dep(), PYGMENTS, pyyaml]),
         tmp_path / "venv",
         runner=runner,
         install_runner=runner,
@@ -425,7 +397,7 @@ def test_execute_verifies_before_prompting_when_nothing_needs_apt(
         raise InstallerError("petal.lock does not fit this system")
 
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
-        if cmd[:3] in (["uv", "pip", "list"], ["uv", "pip", "compile"]):
+        if cmd[:3] == ["uv", "pip", "list"]:
             return fake_uv(cmd, **kwargs)
         raise AssertionError(f"nothing may be installed: {cmd}")
 

@@ -183,7 +183,7 @@ def test_resolution_manager_source_order(tmp_path: Path) -> None:
 
     manager = manager_for(tmp_path, system(modules={"rclpy"}), runner)
     ml = Dep("ml_collections", ">=0.1.1")
-    rclpy, numpy, ml_resolved, again = manager.resolve_all(
+    rclpy, numpy, ml_resolved, again, absl = manager.resolve_all(
         [
             Dep("rclpy", source_hint=Source.ROSDEP),
             Dep("numpy", source_hint=Source.ROSDEP),
@@ -197,6 +197,8 @@ def test_resolution_manager_source_order(tmp_path: Path) -> None:
     assert ml_resolved.chosen_source == Source.PIP
     assert ml_resolved.resolved_version == "0.1.1"
     assert again == ml_resolved
+    # The lock pins what ml_collections pulls in, too.
+    assert absl == ResolvedDep(Dep("absl-py"), Source.PIP, "2.1.0", transitive=True)
 
 
 def test_unknown_rosdep_key_is_never_looked_up_on_pypi(tmp_path: Path) -> None:

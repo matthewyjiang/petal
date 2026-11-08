@@ -75,6 +75,18 @@ def test_sync_installs_apt_and_pypi_without_shadowing_the_system(tmp_path, capsy
         "hint": "pip",
         "version": "13.7.0",
     }
+    # The lock pins the whole closure: what rich pulls in, from PyPI or the system.
+    assert entries["markdown-it-py"] == {
+        "name": "markdown-it-py",
+        "source": "pip",
+        "version": "3.0.0",
+        "transitive": True,
+    }
+    assert entries["pygments"] == {
+        "name": "pygments",
+        "source": "distro",
+        "transitive": True,
+    }
     assert "lock: wrote" in capsys.readouterr().out
 
 
@@ -154,10 +166,13 @@ def test_resolving_again_keeps_locked_versions(tmp_path):  # type: ignore[no-unt
     machine, ws = ros_machine(), app_workspace(tmp_path)
     petal(machine, ws, "sync", "--yes")
     machine.pypi["rich"] = ("14.0.0", ["markdown-it-py", "pygments"])
+    machine.pypi["markdown-it-py"] = ("4.0.0", [])
 
     assert petal(machine, ws, "add", "httpx", "--yes") == 0
 
-    assert lock_entries(ws)["rich"]["version"] == "13.7.0"
+    entries = lock_entries(ws)
+    assert entries["rich"]["version"] == "13.7.0"
+    assert entries["markdown-it-py"]["version"] == "3.0.0"
     assert machine.venv["rich"] == "13.7.0"
 
 
@@ -207,15 +222,17 @@ def test_frozen_on_a_fresh_machine_installs_the_lock_as_recorded(tmp_path):  # t
     author, ws = ros_machine(), app_workspace(tmp_path / "a")
     petal(author, ws, "sync", "--yes")
     lock = (ws / "petal.lock").read_bytes()
-    author.pypi["rich"] = ("14.0.0", ["markdown-it-py", "pygments"])  # released since
+    # Released since the lock was written.
+    author.pypi["rich"] = ("14.0.0", ["markdown-it-py", "pygments"])
+    author.pypi["markdown-it-py"] = ("4.0.0", [])
 
     ci = ros_machine()
     ci.pypi = author.pypi
     assert petal(ci, ws, "sync", "--frozen") == 0
 
-    assert not ci.ran("rosdep")
+    assert not ci.ran("rosdep") and not ci.ran("uv", "pip", "compile")
     assert ci.apt_installed == {"python3-numpy"}
-    assert ci.venv["rich"] == "13.7.0"
+    assert ci.venv == author.venv
     assert (ws / "petal.lock").read_bytes() == lock
 
 

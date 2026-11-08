@@ -101,6 +101,7 @@ class ResolutionManager:
         outcomes = [
             self._select_python(item.dep) if item.chosen_source == Source.PIP else item
             for item in resolved
+            if not item.transitive  # re-derived by _pin_pypi
         ]
         failures = [item for item in outcomes if isinstance(item, Unresolved)]
         if failures:
@@ -152,7 +153,13 @@ class ResolutionManager:
         )
 
     def _pin_pypi(self, resolved: list[ResolvedDep]) -> list[ResolvedDep]:
-        """Resolve all PyPI deps together and record each top-level version."""
+        """Resolve all PyPI deps together and pin the whole closure.
+
+        Declared deps get their versions; packages they pull in are appended as
+        `transitive` entries: PIP pins, or DISTRO when the system provides them,
+        so a frozen install on a machine without them fails instead of leaving
+        a gap. Installing is then just these pins with `--no-deps`.
+        """
         items = [item for item in resolved if item.chosen_source == Source.PIP]
         if not items:
             return resolved
@@ -173,12 +180,26 @@ class ResolutionManager:
                 f"pip dependencies conflict with each other:\n{joint}"
             ) from joint
         versions = {pin.name: pin.version for pin in pins}
-        return [
+        declared = {pip_name(item.dep.name) for item in resolved}
+        pinned = [
             replace(item, resolved_version=versions.get(pip_name(item.dep.name), ""))
             if item.chosen_source == Source.PIP
             else item
             for item in resolved
         ]
+        transitive = [
+            ResolvedDep(
+                Dep(pin.name),
+                Source.DISTRO if self.system.protects(pin.name) else Source.PIP,
+                pin.version,
+                transitive=True,
+            )
+            for pin in pins
+            # Versionless pins are direct references of declared deps, which
+            # install from their own requirement.
+            if pin.name not in declared and pin.version
+        ]
+        return pinned + transitive
 
     def _compile(
         self, requirements: list[str], preferences: dict[str, str]
