@@ -9,7 +9,7 @@ from packaging.requirements import Requirement
 from petal.models import Dep, ResolvedDep, Source
 from petal.planner import PlannerConflict
 from petal.resolve.apt import AptResolver, _candidate_version
-from petal.resolve.base import canonical, python_apt_name
+from petal.resolve.base import canonical, python_apt_name, upstream_version
 from petal.resolve.distro import DistroResolver
 from petal.resolve.manager import (
     ResolutionManager,
@@ -397,3 +397,22 @@ def test_distro_resolver_checks_version_spec_for_bare_deps() -> None:
     assert resolver.resolve(Dep("numpy", ">=2")) is None
     resolved = resolver.resolve(Dep("numpy", "<2"))
     assert resolved is not None and resolved.resolved_version == "1.24.2"
+
+
+def test_apt_resolver_checks_version_spec_against_upstream_version() -> None:
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        return completed(cmd, fixture("apt_policy_numpy.txt"))  # 1:1.24.2-1ubuntu1
+
+    resolver = AptResolver(runner)
+
+    assert resolver.resolve(Dep("numpy", ">=2")) is None
+    resolved = resolver.resolve(Dep("numpy", ">=1.24,<2"))
+    assert resolved is not None and resolved.apt_pkg == "python3-numpy"
+
+
+def test_upstream_version_strips_epoch_and_debian_revision() -> None:
+    assert upstream_version("1:1.24.2-1ubuntu1") == "1.24.2"
+    assert upstream_version("2.25.1+dfsg-2") == "2.25.1+dfsg"
+    assert upstream_version("6.0.1") == "6.0.1"
+    assert upstream_version("1.8.0~rc1-1") == "1.8.0rc1"
+    assert upstream_version("2.0~git20200101-1") == ""
