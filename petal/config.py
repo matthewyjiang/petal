@@ -19,9 +19,20 @@ _KEY_RE = re.compile(r"^\s*(?P<key>[A-Za-z0-9_-]+|\"[^\"]+\")\s*=")
 
 
 def find_workspace_root(start: Path | None = None) -> Path:
+    """The workspace containing `start` (default: cwd).
+
+    The nearest ancestor with petal.toml wins. Without one, the nearest ancestor
+    with a `src/` directory that is not itself a ROS package: ament_cmake
+    packages have their own `src/`, so running petal inside one must not treat
+    the package as the workspace.
+    """
     current = (start or Path.cwd()).resolve()
-    for path in (current, *current.parents):
-        if (path / "petal.toml").exists() or (path / "src").is_dir():
+    ancestors = (current, *current.parents)
+    for path in ancestors:
+        if (path / "petal.toml").is_file():
+            return path
+    for path in ancestors:
+        if (path / "src").is_dir() and not (path / "package.xml").is_file():
             return path
     return current
 
@@ -95,7 +106,8 @@ def manifest_hash(path: Path) -> str:
 # 3: Python requirements the ROS/system Python provides resolve to distro.
 # 4: the lock's dependency_hash covers the input deps, not the resolved ones.
 # 5: lock entries record their declared spec and hint.
-_RESOLUTION_POLICY = "5"
+# 6: apt candidates must satisfy the declared version spec.
+_RESOLUTION_POLICY = "6"
 
 
 def dependency_hash(deps: list[Dep]) -> str:

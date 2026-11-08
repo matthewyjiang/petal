@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from petal.models import Dep, ResolvedDep, Source
-from petal.resolve.base import Runner, default_runner, python_apt_name
+from petal.resolve.base import (
+    Runner,
+    default_runner,
+    python_apt_name,
+    satisfies,
+    upstream_version,
+)
 
 
 class AptResolver:
@@ -18,6 +24,12 @@ class AptResolver:
             return None
         version = _candidate_version(proc.stdout)
         if not version:
+            return None
+        if dep.version_spec and not satisfies(
+            upstream_version(version), dep.version_spec
+        ):
+            # Fall through to later sources rather than install a deb that
+            # does not meet the requirement.
             return None
         return ResolvedDep(
             dep=dep,
