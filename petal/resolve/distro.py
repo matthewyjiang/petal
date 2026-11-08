@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from petal import env
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+
 from petal.models import Dep, ResolvedDep, Source
 from petal.resolve.base import canonical
+from petal.system import SystemView
 
 KNOWN_IMPORTS = {
     "opencv-python": "cv2",
@@ -12,24 +14,36 @@ KNOWN_IMPORTS = {
 
 
 class DistroResolver:
-    def __init__(self, distro: str, modules: set[str] | None = None) -> None:
-        self.distro = distro
-        self.modules = modules
+    """Resolves deps the ROS/system Python already provides; installs nothing."""
 
-    def _modules(self) -> set[str]:
-        if self.modules is None:
-            self.modules = env.distro_provided_modules(self.distro)
-        return self.modules
-
-    def can_resolve(self, dep: Dep) -> bool:
-        return self._import_name(dep.name) in self._modules()
+    def __init__(self, system: SystemView) -> None:
+        self.system = system
 
     def resolve(self, dep: Dep) -> ResolvedDep | None:
-        if not self.can_resolve(dep):
+        version = self.system.version(dep.name)
+        if version:
+            if not _satisfies(version, dep.version_spec):
+                return None
+            return ResolvedDep(dep, Source.DISTRO, resolved_version=version)
+        # Python requirements are distribution names: without matching metadata
+        # the system does not provide them, whatever happens to be importable.
+        if dep.source_hint == Source.PIP:
             return None
-        return ResolvedDep(dep=dep, chosen_source=Source.DISTRO)
+        # ROS packages such as rclpy often ship without distribution metadata.
+        if self._import_name(dep.name) in self.system.python.modules:
+            return ResolvedDep(dep, Source.DISTRO)
+        return None
 
     @staticmethod
     def _import_name(name: str) -> str:
         value = canonical(name)
         return KNOWN_IMPORTS.get(value, value.replace("-", "_"))
+
+
+def _satisfies(version: str, spec: str) -> bool:
+    if not spec:
+        return True
+    try:
+        return SpecifierSet(spec).contains(version, prereleases=True)
+    except InvalidSpecifier:
+        return False

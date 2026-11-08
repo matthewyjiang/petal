@@ -141,6 +141,8 @@ Resolution order: ROS/system modules, `rosdep`, apt (`python3-<name>`), then PyP
 
 `package.xml` keys resolve only through ROS/system modules and `rosdep`; Petal never guesses a PyPI name for them. It skips packages that live in the workspace and deps whose `condition` is false for ROS 2 and the workspace distro. An unresolvable key makes `petal sync` fail with a list of the keys it could not resolve. Fix it with `rosdep update` or an `[overrides]` entry: `{ pip = "..." }`, `{ apt = "..." }`, or `{ skip = true }`.
 
+Pip never shadows system packages. Python requirements the ROS/system Python already satisfies install nothing. PyPI packages are resolved against `.petal/constraints.txt`, which pins every system distribution, and their dependencies skip whatever the system provides. If a requirement needs a different version than the system has, sync fails with uv's explanation. Only explicit pip deps (`petal add --pip <name>`, i.e. `{ pip = ... }` in `petal.toml`) may shadow a system copy. If sync warns that `.petal/venv` shadows a system package, run `petal clean && petal sync`.
+
 ## Colcon Verb
 
 If installed with `petal-ros[colcon]`, use:

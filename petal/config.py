@@ -86,7 +86,8 @@ def manifest_hash(path: Path) -> str:
 
 # Bump when resolution rules change so `petal sync` stops reusing locks that
 # were resolved under the old rules. 2: rosdep keys no longer fall back to PyPI.
-_RESOLUTION_POLICY = "2"
+# 3: Python requirements the ROS/system Python provides resolve to distro.
+_RESOLUTION_POLICY = "3"
 
 
 def dependency_hash(deps: list[Dep]) -> str:

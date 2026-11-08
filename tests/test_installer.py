@@ -8,12 +8,26 @@ import pytest
 from petal.installer import InstallerError, execute, write_lock
 from petal.models import Dep, ResolvedDep, Source
 from petal.planner import Plan
+from petal.system import SystemPython, SystemView
 
 
 def completed(
     cmd: list[str], stdout: str = "", returncode: int = 0
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr="")
+
+
+def compiled(cmd: list[str], kwargs: dict) -> subprocess.CompletedProcess[str]:
+    """Fake `uv pip compile`: pins each stdin requirement plus pygments for rich."""
+    lines = kwargs["input"].split()
+    if any(line.startswith("rich") for line in lines):
+        lines.append("pygments==2.18.0")
+    return completed(cmd, "\n".join(lines) + "\n")
+
+
+def install_cmd(tmp_path: Path, *reqs: str) -> list[str]:
+    python = str(tmp_path / "venv" / "bin" / "python")
+    return ["uv", "pip", "install", "--python", python, "--no-deps", *reqs]
 
 
 def apt_dep(name: str = "numpy") -> ResolvedDep:
@@ -28,12 +42,12 @@ def pip_dep(name: str = "rich") -> ResolvedDep:
 
 def test_execute_dry_run_prints_commands(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     plan = Plan(apt=[apt_dep()], pip=[pip_dep()])
-    assert execute(plan, tmp_path / "venv", dry_run=True) is False
+    runner = lambda cmd, **kwargs: compiled(cmd, kwargs)
+    assert execute(plan, tmp_path / "venv", dry_run=True, runner=runner) is False
 
     out = capsys.readouterr().out
     assert "sudo apt-get install -y python3-numpy" in out
-    assert "uv pip install --python" in out
-    assert "rich==13.7.0" in out
+    assert " ".join(install_cmd(tmp_path, "rich==13.7.0", "pygments==2.18.0")) in out
 
 
 def test_execute_installs_missing_apt_and_pip_then_writes_lock(
@@ -49,6 +63,8 @@ def test_execute_installs_missing_apt_and_pip_then_writes_lock(
             return completed(cmd, returncode=1)
         if cmd[:3] == ["uv", "pip", "list"]:
             return completed(cmd, "[]")
+        if cmd[:3] == ["uv", "pip", "compile"]:
+            return compiled(cmd, kwargs)
         return completed(cmd)
 
     assert (
@@ -65,14 +81,7 @@ def test_execute_installs_missing_apt_and_pip_then_writes_lock(
     )
 
     assert ["sudo", "apt-get", "install", "-y", "python3-numpy"] in calls
-    assert [
-        "uv",
-        "pip",
-        "install",
-        "--python",
-        str(tmp_path / "venv" / "bin" / "python"),
-        "rich==13.7.0",
-    ] in calls
+    assert install_cmd(tmp_path, "rich==13.7.0", "pygments==2.18.0") in calls
     lock = (tmp_path / "petal.lock").read_text(encoding="utf-8")
     assert 'manifest_hash = "sha256:' in lock
     assert 'name = "numpy"' in lock
@@ -82,7 +91,7 @@ def test_execute_installs_missing_apt_and_pip_then_writes_lock(
     assert 'version = "13.7.0"' in lock
     out = capsys.readouterr().out
     assert "APT: installing python3-numpy" in out
-    assert "PIP: installing rich==13.7.0" in out
+    assert "PIP: installing rich==13.7.0, pygments==2.18.0" in out
     assert "lock: wrote" in out
 
 
@@ -158,6 +167,8 @@ def test_frozen_allows_matching_lock(tmp_path: Path) -> None:
         calls.append(cmd)
         if cmd[:3] == ["uv", "pip", "list"]:
             return completed(cmd, "[]")
+        if cmd[:3] == ["uv", "pip", "compile"]:
+            return compiled(cmd, kwargs)
         return completed(cmd)
 
     assert (
@@ -172,25 +183,12 @@ def test_frozen_allows_matching_lock(tmp_path: Path) -> None:
         )
         is True
     )
-    assert calls == [
-        [
-            "uv",
-            "pip",
-            "list",
-            "--python",
-            str(tmp_path / "venv" / "bin" / "python"),
-            "--format",
-            "json",
-        ],
-        [
-            "uv",
-            "pip",
-            "install",
-            "--python",
-            str(tmp_path / "venv" / "bin" / "python"),
-            "rich==13.7.0",
-        ],
+    assert [cmd[:3] for cmd in calls] == [
+        ["uv", "pip", "list"],
+        ["uv", "pip", "compile"],
+        ["uv", "pip", "install"],
     ]
+    assert calls[-1] == install_cmd(tmp_path, "rich==13.7.0", "pygments==2.18.0")
 
 
 def test_execute_no_prompt_skips_install(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -322,3 +320,59 @@ def test_execute_noop_writes_missing_lock(tmp_path: Path, capsys) -> None:  # ty
 def test_execute_non_tty_requires_yes(tmp_path: Path) -> None:
     with pytest.raises(InstallerError, match="--yes"):
         execute(Plan(pip=[pip_dep()]), tmp_path / "venv")
+
+
+def test_execute_never_installs_system_provided_packages(
+    tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    constraints = tmp_path / ".petal" / "constraints.txt"
+    system = SystemView(
+        lambda: SystemPython({"pygments": "2.18.0", "pyyaml": "6.0.1"}),
+        constraints_path=constraints,
+    )
+    calls: list[list[str]] = []
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(cmd)
+        if cmd[:3] == ["uv", "pip", "list"]:
+            # A copy left behind by an older petal that shadows the system one.
+            return completed(cmd, '[{"name":"PyYAML","version":"6.0.2"}]')
+        if cmd[:3] == ["uv", "pip", "compile"]:
+            assert cmd[cmd.index("--constraints") + 1] == str(constraints)
+            return compiled(cmd, kwargs)
+        return completed(cmd)
+
+    assert execute(
+        Plan(pip=[pip_dep()]),
+        tmp_path / "venv",
+        runner=runner,
+        install_runner=runner,
+        assume_yes=True,
+        system=system,
+    )
+
+    install = install_cmd(tmp_path, "rich==13.7.0")
+    install[6:6] = ["--constraints", str(constraints)]
+    assert calls[-1] == install
+    out = capsys.readouterr().out
+    assert "pyyaml 6.0.2, shadowing the system's 6.0.1" in out
+
+
+def test_execute_reports_unresolvable_pip_closure(tmp_path: Path) -> None:
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[:3] == ["uv", "pip", "list"]:
+            return completed(cmd, "[]")
+        if cmd[:3] == ["uv", "pip", "compile"]:
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout="", stderr="numpy>=2 and numpy==1.24.2 conflict"
+            )
+        raise AssertionError(f"must not run {cmd}")
+
+    with pytest.raises(InstallerError, match="numpy>=2 and numpy==1.24.2"):
+        execute(
+            Plan(pip=[pip_dep()]),
+            tmp_path / "venv",
+            runner=runner,
+            install_runner=runner,
+            assume_yes=True,
+        )

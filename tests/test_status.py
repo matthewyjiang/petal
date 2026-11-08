@@ -172,3 +172,21 @@ def test_print_report_issues_are_bulleted(capsys) -> None:  # type: ignore[no-un
     out = capsys.readouterr().out
     assert "0 synced  ·  1 missing" in out
     assert "  missing:\n    petal.lock" in out
+
+
+def test_status_compares_distro_versions_from_metadata(tmp_path: Path) -> None:
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text('[workspace]\nros_distro = "humble"\n', encoding="utf-8")
+    write_lock(
+        tmp_path / "petal.lock",
+        manifest,
+        [ResolvedDep(Dep("python-dateutil"), Source.DISTRO, resolved_version="2.8.2")],
+    )
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        assert "m.version('python-dateutil')" in cmd[-1]
+        return completed(cmd, "2.9.0\n")
+
+    report = check_status(tmp_path, tmp_path / ".petal" / "venv", runner)
+
+    assert report.drifted == ["python-dateutil (2.9.0 != 2.8.2)"]

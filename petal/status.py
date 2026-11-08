@@ -54,7 +54,11 @@ def check_status(
             actual = pip_versions.get(pip_name(name), "")
             _bucket(report, name, actual, item.resolved_version)
         elif item.chosen_source == Source.DISTRO:
-            if _distro_importable(name, venv, runner):
+            if item.resolved_version:
+                # Locked from distribution metadata: compare versions.
+                actual = _distribution_version(name, venv, runner)
+                _bucket(report, name, actual, item.resolved_version)
+            elif _python_importable(name, venv, runner):
                 report.in_sync.append(name)
             else:
                 report.missing.append(name)
@@ -115,8 +119,10 @@ def _pip_versions(venv: Path, runner: Runner) -> dict[str, str]:
     return {pip_name(str(item["name"])): str(item["version"]) for item in data}
 
 
-def _distro_importable(name: str, venv: Path, runner: Runner) -> bool:
-    return _python_importable(name, venv, runner)
+def _distribution_version(name: str, venv: Path, runner: Runner) -> str:
+    code = f"import importlib.metadata as m; print(m.version({name!r}))"
+    proc = runner([str(venv_python(venv)), "-c", code])
+    return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
 def _python_importable(name: str, venv: Path, runner: Runner) -> bool:

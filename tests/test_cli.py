@@ -449,6 +449,9 @@ def test_add_unresolvable_dep_errors_and_leaves_manifest(  # type: ignore[no-unt
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
             pass
 
+        def failure_reason(self, dep: Dep) -> str:
+            return ""
+
         def resolve(self, dep: Dep) -> ResolvedDep | None:
             return None
 
@@ -488,6 +491,9 @@ def test_sync_fails_loudly_on_unresolvable_deps(  # type: ignore[no-untyped-def]
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
             pass
 
+        def failure_reason(self, dep: Dep) -> str:
+            return ""
+
         def resolve(self, dep: Dep) -> ResolvedDep | None:
             return ResolvedDep(dep, Source.PIP) if dep is rich else None
 
@@ -525,6 +531,9 @@ def test_add_validates_whole_workspace_before_installing(  # type: ignore[no-unt
     class FakeManager:
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
             pass
+
+        def failure_reason(self, dep: Dep) -> str:
+            return ""
 
         def resolve(self, dep: Dep) -> ResolvedDep | None:
             return None if dep is typo else ResolvedDep(dep, Source.PIP)

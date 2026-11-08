@@ -39,6 +39,18 @@ PyPI packages are installed into `.petal/venv`, not into system Python.
 
 The venv is always created with `--system-site-packages` so modules provided by ROS and apt, such as `rclpy`, remain importable at runtime.
 
+### Pip never shadows system packages
+
+ROS packages are built against the Python packages your system provides. A second copy of numpy or PyYAML in `.petal/venv` would take precedence over the system copy and can break them. Petal prevents this:
+
+- A Python requirement the system already satisfies, such as `requests>=2` from a `setup.cfg`, resolves to the system copy and installs nothing.
+- Every system distribution is pinned in `.petal/constraints.txt`. PyPI packages are resolved against those pins, and their dependencies are installed with `--no-deps`, minus anything the system provides.
+- If a requirement needs a different version than the system has, `petal sync` fails and shows uv's explanation instead of installing a shadowing copy.
+
+To shadow a system package on purpose, declare it explicitly as a pip dependency, for example `petal add --pip numpy ">=2"`. Such packages are left out of the constraints.
+
+`petal sync` warns when `.petal/venv` already contains a copy of a system package, for example one installed by an older petal version. Run `petal clean && petal sync` to remove it.
+
 ## Manifest and lockfile
 
 Petal records requested dependencies in `petal.toml`:

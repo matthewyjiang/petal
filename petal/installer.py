@@ -22,6 +22,8 @@ from petal.resolve.base import (
     dep_requirement,
     venv_python,
 )
+from petal.resolve.pip import Pin, PipCompileError, compile_requirements
+from petal.system import NO_SYSTEM, SystemView
 
 
 class InstallerError(RuntimeError):
@@ -40,7 +42,14 @@ def execute(
     install_runner: StreamRunner = default_stream_runner,
     assume_yes: bool = False,
     assume_no: bool = False,
+    system: SystemView = NO_SYSTEM,
 ) -> bool:
+    """Install what `plan` needs; returns False when nothing was applied.
+
+    Pip packages are installed as a fully resolved closure with `--no-deps`,
+    skipping anything the ROS/system Python provides, so the venv never holds a
+    copy that shadows a system package (unless the user explicitly allowed it).
+    """
     if frozen:
         if not workspace_root:
             raise InstallerError("frozen install requires workspace root")
@@ -58,13 +67,15 @@ def execute(
 
     if dry_run:
         _print_plan(plan, venv)
-        _print_dry_run(apt_pkgs, pip_reqs, venv)
+        pins = _pip_closure(pip_reqs, venv, system, runner, installed={})
+        _print_dry_run(apt_pkgs, [pin.requirement for pin in pins], venv, system)
         return False
 
     missing_apt = [pkg for pkg in apt_pkgs if not _apt_installed(pkg, runner)]
-    missing_pip = _missing_pip(plan.pip, venv, runner)
-    pip_reqs_to_install = [_pip_requirement(item) for item in missing_pip]
-    will_install = bool(missing_apt or pip_reqs_to_install)
+    installed = _pip_versions(venv, runner) if plan.pip else {}
+    _warn_shadowing(installed, system)
+    missing_pip = _missing_pip(plan.pip, installed)
+    will_install = bool(missing_apt or missing_pip)
 
     if not will_install:
         if distro_names or apt_pkgs or pip_reqs:
@@ -100,26 +111,17 @@ def execute(
     elif apt_pkgs:
         print("APT: already installed " + ", ".join(apt_pkgs))
 
-    if pip_reqs_to_install:
-        print("PIP: installing " + ", ".join(pip_reqs_to_install))
-        proc = install_runner(
-            [
-                "uv",
-                "pip",
-                "install",
-                "--python",
-                str(venv_python(venv)),
-                *pip_reqs_to_install,
-            ]
-        )
-        if proc.returncode != 0:
-            pip_proc = install_runner(
-                [str(venv_python(venv)), "-m", "pip", "install", *pip_reqs_to_install]
-            )
-            if pip_proc.returncode != 0:
-                raise InstallerError(
-                    pip_proc.stderr or proc.stderr or "pip install failed"
-                )
+    if missing_pip:
+        if missing_apt:
+            # New python3-* debs change what the system provides.
+            system.refresh()
+        pins = _pip_closure(pip_reqs, venv, system, runner, installed)
+        if pins:
+            reqs = [pin.requirement for pin in pins]
+            print("PIP: installing " + ", ".join(reqs))
+            proc = install_runner(pip_install_command(venv, system, reqs))
+            if proc.returncode != 0:
+                raise InstallerError(proc.stderr or "pip install failed")
 
     if not distro_names and not apt_pkgs and not pip_reqs:
         print("petal: no dependencies to install")
@@ -226,12 +228,50 @@ def _pip_requirement(item: ResolvedDep) -> str:
     return dep_requirement(item.dep)
 
 
-def _missing_pip(
-    items: list[ResolvedDep], venv: Path, runner: Runner
-) -> list[ResolvedDep]:
-    if not items:
+def pip_install_command(venv: Path, system: SystemView, reqs: list[str]) -> list[str]:
+    """`uv pip install` for an already-resolved closure, guarded by system pins."""
+    cmd = ["uv", "pip", "install", "--python", str(venv_python(venv)), "--no-deps"]
+    constraints = system.constraints_file()
+    if constraints is not None:
+        cmd += ["--constraints", str(constraints)]
+    return [*cmd, *reqs]
+
+
+def _pip_closure(
+    reqs: list[str],
+    venv: Path,
+    system: SystemView,
+    runner: Runner,
+    installed: dict[str, str],
+) -> list[Pin]:
+    """Pins pip must install: the resolved closure minus system and venv copies."""
+    if not reqs:
         return []
-    installed = _pip_versions(venv, runner)
+    try:
+        pins = compile_requirements(reqs, venv, system, runner)
+    except PipCompileError as exc:
+        raise InstallerError(f"pip dependencies cannot be resolved:\n{exc}") from exc
+    return [
+        pin
+        for pin in pins
+        if not system.protects(pin.name)
+        and not (pin.version and installed.get(pin.name) == pin.version)
+    ]
+
+
+def _warn_shadowing(installed: dict[str, str], system: SystemView) -> None:
+    """Flag venv copies of system packages, e.g. left by older petal versions."""
+    for name, version in sorted(installed.items()):
+        if system.protects(name):
+            print(
+                f"warning: .petal/venv has {name} {version}, shadowing the system's "
+                f"{system.version(name)}; run `petal clean && petal sync` to drop it"
+            )
+
+
+def _missing_pip(
+    items: list[ResolvedDep], installed: dict[str, str]
+) -> list[ResolvedDep]:
     missing: list[ResolvedDep] = []
     for item in items:
         key = pip_name(item.dep.name)
@@ -313,7 +353,9 @@ def _confirm_install(*, assume_yes: bool, assume_no: bool) -> bool:
     return answer in {"", "y", "yes"}
 
 
-def _print_dry_run(apt_pkgs: list[str], pip_reqs: list[str], venv: Path) -> None:
+def _print_dry_run(
+    apt_pkgs: list[str], pip_reqs: list[str], venv: Path, system: SystemView
+) -> None:
     if apt_pkgs:
         print("APT:")
         print("sudo apt-get install -y " + " ".join(apt_pkgs))
@@ -322,12 +364,7 @@ def _print_dry_run(apt_pkgs: list[str], pip_reqs: list[str], venv: Path) -> None
 
     if pip_reqs:
         print("PIP:")
-        print(
-            "uv pip install --python "
-            + str(venv_python(venv))
-            + " "
-            + " ".join(pip_reqs)
-        )
+        print(" ".join(pip_install_command(venv, system, pip_reqs)))
     else:
         print("PIP: no changes")
 

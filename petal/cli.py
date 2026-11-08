@@ -30,6 +30,7 @@ from petal.models import Dep, ResolvedDep, Source
 from petal.planner import Plan, PlannerConflict, build_plan
 from petal.resolve.manager import ResolutionManager, UnresolvedDependencies
 from petal.status import check_status, print_report
+from petal.system import SystemView, inspect_system_python
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
@@ -73,10 +74,27 @@ def _cmd_clean(args: argparse.Namespace) -> int:
     return 0
 
 
+def _system_view(
+    workspace: Path, distro: str, manifest_path: Path, extra_shadow: str = ""
+) -> SystemView:
+    """System packages for `distro`; explicit `{ pip = ... }` deps may shadow them."""
+    manifest = load_manifest(manifest_path) if manifest_path.exists() else None
+    shadow = [
+        d.name
+        for d in (manifest.deps if manifest else [])
+        if d.source_hint == Source.PIP
+    ]
+    if extra_shadow:
+        shadow.append(extra_shadow)
+    return SystemView(
+        lambda: inspect_system_python(distro),
+        constraints_path=workspace / ".petal" / "constraints.txt",
+        allow_shadow=shadow,
+    )
+
+
 def _resolve_deps(manager: ResolutionManager, deps: list[Dep]) -> list[ResolvedDep]:
     """Resolve every dep, raising UnresolvedDependencies if any has no source."""
-    if hasattr(manager, "preload"):
-        manager.preload()
     workers = max(1, min(8, len(deps)))
     if workers == 1:
         results = [manager.resolve(dep) for dep in deps]
@@ -85,7 +103,8 @@ def _resolve_deps(manager: ResolutionManager, deps: list[Dep]) -> list[ResolvedD
             results = list(pool.map(manager.resolve, deps))
     unresolved = [dep for dep, item in zip(deps, results) if item is None]
     if unresolved:
-        raise UnresolvedDependencies(unresolved)
+        reasons = {dep.name: manager.failure_reason(dep) for dep in unresolved}
+        raise UnresolvedDependencies(unresolved, reasons)
     return [item for item in results if item is not None]
 
 
@@ -107,6 +126,7 @@ def _cmd_sync(args: argparse.Namespace) -> int:
     deps = [*(manifest.deps if manifest else []), *discovered.deps]
     lock_path = workspace / "petal.lock"
     lock = load_lock_or_none(lock_path)
+    system = _system_view(workspace, distro, manifest_path)
     if (
         not args.dry_run
         and lock
@@ -116,12 +136,13 @@ def _cmd_sync(args: argparse.Namespace) -> int:
     ):
         plan = build_plan(lock.resolved)
     else:
-        manager = ResolutionManager(ros_distro=distro, venv=venv)
+        manager = ResolutionManager(ros_distro=distro, venv=venv, system=system)
         resolved = _resolve_deps(manager, deps)
         plan = build_plan(resolved)
     execute(
         plan,
         venv,
+        system=system,
         frozen=args.frozen,
         dry_run=args.dry_run,
         assume_yes=args.yes or args.frozen,
@@ -152,13 +173,18 @@ def _cmd_add(args: argparse.Namespace) -> int:
     venv = env.ensure_venv(workspace, distro)
     source_hint = Source.PIP if args.pip else Source.APT if args.apt else None
     dep = _dep_from_add_args(args.name, args.spec or "", source_hint)
-    manager = ResolutionManager(ros_distro=distro, venv=venv)
+    system = _system_view(
+        workspace, distro, manifest_path, dep.name if source_hint == Source.PIP else ""
+    )
+    manager = ResolutionManager(ros_distro=distro, venv=venv, system=system)
     resolved = manager.resolve(dep)
     if resolved is None:
         print(
             f"petal: could not resolve '{args.name}' from any source; not added",
             file=sys.stderr,
         )
+        for line in manager.failure_reason(dep).splitlines():
+            print(f"  {line}", file=sys.stderr)
         return 1
 
     original = manifest_path.read_bytes()
@@ -176,6 +202,7 @@ def _cmd_add(args: argparse.Namespace) -> int:
         proceeded = execute(
             build_plan([resolved]),
             venv,
+            system=system,
             dry_run=args.dry_run,
             assume_yes=args.yes,
             assume_no=args.no,
@@ -218,7 +245,8 @@ def _cmd_remove(args: argparse.Namespace) -> int:
         )
     try:
         # Same ordering as add: validate the post-change workspace first.
-        manager = ResolutionManager(ros_distro=distro, venv=venv)
+        system = _system_view(workspace, distro, manifest_path)
+        manager = ResolutionManager(ros_distro=distro, venv=venv, system=system)
         lock_plan = _workspace_plan(workspace, manifest_path, distro, manager)
         uninstall(args.name, venv, dry_run=False)
     except BaseException:
