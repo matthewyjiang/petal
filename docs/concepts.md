@@ -63,7 +63,7 @@ numpy = ">=1.24"
 ultralytics = "*"
 ```
 
-After resolution and installation, Petal writes `petal.lock` with the resolved source for each dependency. The lock is safe to commit: it records what you declared, which source was chosen, and pinned versions for the whole PyPI closure: your PyPI dependencies and everything they pull in (marked `transitive`). System packages are recorded without versions, so the lock does not change with whichever machine resolved it.
+After resolution and installation, Petal writes `petal.lock` with the resolved source for each dependency. The lock is safe to commit: it records what you declared, which source was chosen, and pinned versions for the whole PyPI closure: your PyPI dependencies and everything they pull in (marked `transitive`). A pulled-in package that the system provides is pinned too: Petal leaves it to the system here, and a machine without it installs the locked version. System packages are recorded without versions, so the lock does not change with whichever machine resolved it.
 
 When Petal resolves again, it keeps locked and installed PyPI versions where they are still compatible. Adding one dependency does not upgrade the others.
 

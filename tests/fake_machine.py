@@ -89,14 +89,21 @@ class FakeMachine:
                 rows = [{"name": n, "version": v} for n, v in self.venv.items()]
                 return _done(cmd, out=json.dumps(rows))
             case ["uv", "pip", "install", *args]:
-                for req in (a for a in args if "==" in a):
-                    name, version = req.split("==", 1)
-                    self.venv[canonicalize_name(name)] = version
+                # petal installs a resolved closure; uv must not add to it.
+                assert "--no-deps" in args, cmd
+                for arg in args:
+                    if "==" in arg:
+                        name, version = arg.split("==", 1)
+                        self.venv[canonicalize_name(name)] = version
+                    elif "@" in arg:  # a direct reference installs its URL
+                        name = canonicalize_name(Requirement(arg).name)
+                        self.venv[name] = "0.1.0"
                 return _done(cmd)
             case ["uv", "pip", "uninstall", *args]:
                 if self.uninstall_fails:
                     return _done(cmd, 1, err="uninstall failed")
-                self.venv.pop(canonicalize_name(args[-1]), None)
+                for name in args[2:]:  # after --python <venv python>
+                    self.venv.pop(canonicalize_name(name), None)
                 return _done(cmd)
             case [_, "-c", code] if code.startswith("import "):
                 module = code.removeprefix("import ")
@@ -116,13 +123,19 @@ class FakeMachine:
         # Like uv: an existing output file holds soft version preferences.
         output = Path(args[args.index("--output-file") + 1])
         preferred = dict(
-            line.split("==", 1) for line in output.read_text().splitlines() if line
+            line.split("==", 1)
+            for line in output.read_text().splitlines()
+            if "==" in line
         )
         pins: dict[str, str] = {}
+        urls: dict[str, str] = {}
         queue = [Requirement(line) for line in stdin.splitlines() if line.strip()]
         while queue:
             req = queue.pop()
             name = canonicalize_name(req.name)
+            if req.url:
+                urls[name] = req.url
+                continue
             if name in pinned:
                 version = pinned[name]
             elif name in preferred and req.specifier.contains(preferred[name]):
@@ -140,7 +153,9 @@ class FakeMachine:
             if not req.specifier.contains(version, prereleases=True):
                 return _done(cmd, 1, err=f"{name}{req.specifier} is unsatisfiable")
             pins[name] = version
-        output.write_text("".join(f"{n}=={v}\n" for n, v in sorted(pins.items())))
+        lines = [f"{n}=={v}" for n, v in pins.items()]
+        lines += [f"{n} @ {url}" for n, url in urls.items()]
+        output.write_text("".join(f"{line}\n" for line in sorted(lines)))
         return _done(cmd)
 
     def _ensure_venv(self, workspace: Path, distro: str) -> Path:

@@ -47,7 +47,7 @@ def check_status(
         report.manifest_changed = True
 
     pip_versions: dict[str, str] | None = None
-    distro: DistroResolver | None = None
+    system: SystemView | None = None
     for item in lock.resolved:
         name = item.dep.name
         if item.chosen_source == Source.APT:
@@ -58,6 +58,12 @@ def check_status(
                 report.in_sync.append(name)
             else:
                 report.missing.append(name)
+        elif (
+            item.chosen_source == Source.PIP
+            and item.transitive
+            and (system := system or load_system()).protects(name)
+        ):
+            report.in_sync.append(name)
         elif item.chosen_source == Source.PIP:
             if pip_versions is None:
                 pip_versions = venv_versions(venv, runner)
@@ -66,8 +72,8 @@ def check_status(
         elif item.chosen_source == Source.DISTRO:
             # Same view of the system as resolution, independent of whether
             # this shell sourced ROS. The locked version is informational.
-            distro = distro or DistroResolver(load_system())
-            if distro.resolve(item.dep):
+            system = system or load_system()
+            if DistroResolver(system).resolve(item.dep):
                 report.in_sync.append(name)
             else:
                 report.missing.append(name)

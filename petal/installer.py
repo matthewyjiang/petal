@@ -171,13 +171,15 @@ def _lock_matches(
 
 
 def uninstall(
-    name: str,
+    names: list[str],
     venv: Path,
     *,
     dry_run: bool = False,
     runner: Runner = default_runner,
 ) -> None:
-    uv_cmd = ["uv", "pip", "uninstall", "--python", str(venv_python(venv)), name]
+    if not names:
+        return
+    uv_cmd = ["uv", "pip", "uninstall", "--python", str(venv_python(venv)), *names]
     if dry_run:
         print("PIP uninstall:")
         print(" ".join(uv_cmd))
@@ -227,17 +229,21 @@ def pip_install_command(venv: Path, system: SystemView, reqs: list[str]) -> list
 def _pins_to_install(
     plan: Plan, system: SystemView, installed: dict[str, str]
 ) -> list[str]:
-    """Requirements pip must install: planned pins not already provided by the
-    system or present in the venv at that version."""
+    """Requirements pip must install: planned pins the system does not provide
+    and the venv does not already have."""
     return [
         _pip_requirement(item)
         for item in plan.pip
-        if not system.protects(item.dep.name)
-        and not (
-            item.resolved_version
-            and installed.get(pip_name(item.dep.name)) == item.resolved_version
-        )
+        if not system.protects(item.dep.name) and _missing(item, installed)
     ]
+
+
+def _missing(item: ResolvedDep, installed: dict[str, str]) -> bool:
+    actual = installed.get(pip_name(item.dep.name))
+    if actual is None:
+        return True
+    # Direct references (`pkg @ git+...`) have no version to compare.
+    return bool(item.resolved_version) and actual != item.resolved_version
 
 
 def _warn_shadowing(installed: dict[str, str], system: SystemView) -> None:
