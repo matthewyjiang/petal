@@ -184,12 +184,8 @@ def uninstall(
         return
 
     proc = runner(uv_cmd)
-    if proc.returncode == 0:
-        return
-
-    pip_proc = runner([str(venv_python(venv)), "-m", "pip", "uninstall", "-y", name])
-    if pip_proc.returncode != 0:
-        raise InstallerError(pip_proc.stderr or proc.stderr or "pip uninstall failed")
+    if proc.returncode != 0:
+        raise InstallerError(proc.stderr or "pip uninstall failed")
 
 
 def _lock_entry(item: ResolvedDep) -> dict[str, str]:

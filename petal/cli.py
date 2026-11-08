@@ -20,6 +20,7 @@ from petal.config import (
     write_manifest,
 )
 from petal.discover.workspace import discover_workspace
+from petal.host import Host
 from petal.identity import pip_name
 from petal.installer import InstallerError, execute, uninstall, write_lock
 from petal.models import Dep, Lock, LockStamp, Source
@@ -30,25 +31,25 @@ from petal.resolve.manager import (
     lock_mismatch,
 )
 from petal.status import check_status, print_report
-from petal.system import SystemView, inspect_system_python
+from petal.system import SystemView
 
 
-def _cmd_init(args: argparse.Namespace) -> int:
+def _cmd_init(args: argparse.Namespace, host: Host) -> int:
     workspace = find_workspace_root(
         Path(args.workspace) if args.workspace else Path.cwd()
     )
-    distro = env.detect_ros_distro()
+    distro = host.detect_ros_distro()
     manifest = workspace / "petal.toml"
     if not manifest.exists():
         write_manifest(manifest, ros_distro=distro)
-    venv = env.ensure_venv(workspace, distro)
+    venv = host.ensure_venv(workspace, distro)
     print(f"initialized {workspace}")
     print(f"venv: {venv}")
     print(f"activate: {workspace / '.petal' / 'activate'}")
     return 0
 
 
-def _cmd_activate(args: argparse.Namespace) -> int:
+def _cmd_activate(args: argparse.Namespace, host: Host) -> int:
     workspace = find_workspace_root(
         Path(args.workspace) if args.workspace else Path.cwd()
     )
@@ -62,7 +63,7 @@ def _cmd_activate(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_clean(args: argparse.Namespace) -> int:
+def _cmd_clean(args: argparse.Namespace, host: Host) -> int:
     workspace = find_workspace_root(
         Path(args.workspace) if args.workspace else Path.cwd()
     )
@@ -79,12 +80,14 @@ class _Inputs:
     stamp: LockStamp
 
 
-def _load_inputs(workspace: Path, manifest_path: Path, distro: str) -> _Inputs:
+def _load_inputs(
+    host: Host, workspace: Path, manifest_path: Path, distro: str
+) -> _Inputs:
     manifest = load_manifest(manifest_path) if manifest_path.exists() else None
     manifest_deps = manifest.deps if manifest else []
     deps = [*manifest_deps, *discover_workspace(workspace, ros_distro=distro).deps]
     system = SystemView(
-        lambda: inspect_system_python(distro),
+        lambda: host.inspect_system(distro),
         constraints_path=workspace / ".petal" / "constraints.txt",
         # Explicit `{ pip = ... }` entries in [deps] may shadow system copies.
         allow_shadow=[d.name for d in manifest_deps if d.source_hint == Source.PIP],
@@ -93,7 +96,7 @@ def _load_inputs(workspace: Path, manifest_path: Path, distro: str) -> _Inputs:
 
 
 def _manager(
-    inputs: _Inputs, distro: str, venv: Path, lock: Lock | None
+    host: Host, inputs: _Inputs, distro: str, venv: Path, lock: Lock | None
 ) -> ResolutionManager:
     """Resolver for the workspace that keeps locked PyPI versions when it can."""
     locked = {
@@ -102,18 +105,24 @@ def _manager(
         if item.chosen_source == Source.PIP
     }
     return ResolutionManager(
-        ros_distro=distro, venv=venv, system=inputs.system, locked=locked
+        ros_distro=distro,
+        venv=venv,
+        system=inputs.system,
+        locked=locked,
+        runner=host.runner,
     )
 
 
 def _workspace_plan(
-    inputs: _Inputs, distro: str, venv: Path, lock: Lock | None
+    host: Host, inputs: _Inputs, distro: str, venv: Path, lock: Lock | None
 ) -> Plan:
     """Resolve the whole workspace; raises before anything is installed."""
-    return build_plan(_manager(inputs, distro, venv, lock).resolve_all(inputs.deps))
+    manager = _manager(host, inputs, distro, venv, lock)
+    return build_plan(manager.resolve_all(inputs.deps))
 
 
 def _sync(
+    host: Host,
     workspace: Path,
     distro: str,
     venv: Path,
@@ -132,11 +141,11 @@ def _sync(
     """
     manifest_path = workspace / "petal.toml"
     lock_path = workspace / "petal.lock"
-    inputs = _load_inputs(workspace, manifest_path, distro)
+    inputs = _load_inputs(host, workspace, manifest_path, distro)
     lock = load_lock_or_none(lock_path)
 
     def replan(plan: Plan) -> Plan:
-        manager = _manager(inputs, distro, venv, lock)
+        manager = _manager(host, inputs, distro, venv, lock)
         return build_plan(manager.reselect_python(plan.items()))
 
     if frozen:
@@ -166,13 +175,15 @@ def _sync(
             dry_run=dry_run,
             assume_yes=True,
             verify=verify,
+            runner=host.runner,
+            install_runner=host.install_runner,
         )
 
     fits = lock is not None and not lock_mismatch(lock.resolved, inputs.system)
     if reuse_lock and lock and lock.stamp == inputs.stamp and fits:
         plan = build_plan(lock.resolved)
     else:
-        plan = _workspace_plan(inputs, distro, venv, lock)
+        plan = _workspace_plan(host, inputs, distro, venv, lock)
     return execute(
         plan,
         venv,
@@ -183,11 +194,13 @@ def _sync(
         lock_path=lock_path,
         stamp=inputs.stamp,
         replan=replan,
+        runner=host.runner,
+        install_runner=host.install_runner,
     )
 
 
-def _cmd_sync(args: argparse.Namespace) -> int:
-    preflight.assert_ok(preflight.check())
+def _cmd_sync(args: argparse.Namespace, host: Host) -> int:
+    preflight.assert_ok(host.check_tools())
     workspace = find_workspace_root(
         Path(args.workspace) if args.workspace else Path.cwd()
     )
@@ -196,10 +209,11 @@ def _cmd_sync(args: argparse.Namespace) -> int:
     distro = (
         manifest.ros_distro
         if manifest and manifest.ros_distro
-        else env.detect_ros_distro()
+        else host.detect_ros_distro()
     )
-    venv = env.ensure_venv(workspace, distro)
+    venv = host.ensure_venv(workspace, distro)
     _sync(
+        host,
         workspace,
         distro,
         venv,
@@ -212,18 +226,18 @@ def _cmd_sync(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_add(args: argparse.Namespace) -> int:
-    preflight.assert_ok(preflight.check())
+def _cmd_add(args: argparse.Namespace, host: Host) -> int:
+    preflight.assert_ok(host.check_tools())
     workspace = find_workspace_root(
         Path(args.workspace) if args.workspace else Path.cwd()
     )
     manifest_path = workspace / "petal.toml"
     if not manifest_path.exists():
-        write_manifest(manifest_path, ros_distro=env.detect_ros_distro())
+        write_manifest(manifest_path, ros_distro=host.detect_ros_distro())
 
     manifest = load_manifest(manifest_path)
-    distro = manifest.ros_distro or env.detect_ros_distro()
-    venv = env.ensure_venv(workspace, distro)
+    distro = manifest.ros_distro or host.detect_ros_distro()
+    venv = host.ensure_venv(workspace, distro)
     source_hint = Source.PIP if args.pip else Source.APT if args.apt else None
 
     original = manifest_path.read_bytes()
@@ -237,6 +251,7 @@ def _cmd_add(args: argparse.Namespace) -> int:
     try:
         # `add` is a sync of the edited manifest; any failure restores it.
         proceeded = _sync(
+            host,
             workspace,
             distro,
             venv,
@@ -253,8 +268,8 @@ def _cmd_add(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_remove(args: argparse.Namespace) -> int:
-    preflight.assert_ok(preflight.check())
+def _cmd_remove(args: argparse.Namespace, host: Host) -> int:
+    preflight.assert_ok(host.check_tools())
     workspace = find_workspace_root(
         Path(args.workspace) if args.workspace else Path.cwd()
     )
@@ -264,25 +279,24 @@ def _cmd_remove(args: argparse.Namespace) -> int:
         return 0
 
     manifest = load_manifest(manifest_path)
-    distro = manifest.ros_distro or env.detect_ros_distro()
-    venv = env.ensure_venv(workspace, distro)
+    distro = manifest.ros_distro or host.detect_ros_distro()
+    venv = host.ensure_venv(workspace, distro)
     if not manifest_has_dep(manifest_path, args.name):
         print(f"{args.name} not present in petal.toml")
         return 0
 
     if args.dry_run:
-        uninstall(args.name, venv, dry_run=True)
+        uninstall(args.name, venv, dry_run=True, runner=host.runner)
         return 0
 
     original = manifest_path.read_bytes()
     remove_manifest_dep(manifest_path, args.name)
     try:
         # Same ordering as add: validate the post-change workspace first.
-        inputs = _load_inputs(workspace, manifest_path, distro)
-        plan = _workspace_plan(
-            inputs, distro, venv, load_lock_or_none(workspace / "petal.lock")
-        )
-        uninstall(args.name, venv, dry_run=False)
+        inputs = _load_inputs(host, workspace, manifest_path, distro)
+        lock = load_lock_or_none(workspace / "petal.lock")
+        plan = _workspace_plan(host, inputs, distro, venv, lock)
+        uninstall(args.name, venv, dry_run=False, runner=host.runner)
     except BaseException:
         manifest_path.write_bytes(original)
         raise
@@ -290,8 +304,8 @@ def _cmd_remove(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_status(args: argparse.Namespace) -> int:
-    preflight.assert_ok(preflight.check())
+def _cmd_status(args: argparse.Namespace, host: Host) -> int:
+    preflight.assert_ok(host.check_tools())
     workspace = find_workspace_root(
         Path(args.workspace) if args.workspace else Path.cwd()
     )
@@ -300,17 +314,16 @@ def _cmd_status(args: argparse.Namespace) -> int:
     distro = (
         manifest.ros_distro
         if manifest and manifest.ros_distro
-        else env.detect_ros_distro()
+        else host.detect_ros_distro()
     )
     venv = env.venv_path(workspace)
     if not venv.exists():
-        venv = env.ensure_venv(workspace, distro)
+        venv = host.ensure_venv(workspace, distro)
     report = check_status(
         workspace,
         venv,
-        lambda: SystemView(
-            lambda: inspect_system_python(distro), constraints_path=None
-        ),
+        lambda: SystemView(lambda: host.inspect_system(distro), constraints_path=None),
+        host.runner,
     )
     print_report(report)
     return 0 if report.ok else 2
@@ -333,7 +346,7 @@ def _skill_source() -> Path:
     )
 
 
-def _cmd_install_agent_skill(args: argparse.Namespace) -> int:
+def _cmd_install_agent_skill(args: argparse.Namespace, host: Host) -> int:
     target_root = (
         Path(args.target).expanduser()
         if args.target
@@ -440,11 +453,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, host: Host | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        return args.func(args)
+        return args.func(args, host or Host())
     except KeyboardInterrupt:
         print("petal: cancelled", file=sys.stderr)
         return 130
