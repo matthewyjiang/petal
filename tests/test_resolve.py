@@ -414,4 +414,5 @@ def test_upstream_version_strips_epoch_and_debian_revision() -> None:
     assert upstream_version("1:1.24.2-1ubuntu1") == "1.24.2"
     assert upstream_version("2.25.1+dfsg-2") == "2.25.1+dfsg"
     assert upstream_version("6.0.1") == "6.0.1"
-    assert upstream_version("1.8.0~rc1-1") == ""
+    assert upstream_version("1.8.0~rc1-1") == "1.8.0rc1"
+    assert upstream_version("2.0~git20200101-1") == ""

@@ -76,3 +76,13 @@ def test_workspace_root_prefers_petal_toml_over_nearer_src(tmp_path: Path) -> No
     (nested / "src").mkdir(parents=True)
 
     assert find_workspace_root(nested) == tmp_path
+
+
+def test_workspace_root_ignores_a_petal_toml_above_another_workspace(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "petal.toml").write_text("[deps]\n", encoding="utf-8")  # stray
+    ws = tmp_path / "ws2"
+    (ws / "src" / "pkg").mkdir(parents=True)
+
+    assert find_workspace_root(ws / "src" / "pkg") == ws

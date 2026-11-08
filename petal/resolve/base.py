@@ -118,9 +118,10 @@ def satisfies(version: str, spec: str) -> bool:
 def upstream_version(debian_version: str) -> str:
     """PEP 440 form of a Debian version, or "" when it has none.
 
-    `1:1.24.2-1ubuntu1` -> `1.24.2`; `2.25.1+dfsg-2` -> `2.25.1+dfsg`.
+    `1:1.24.2-1ubuntu1` -> `1.24.2`; `2.25.1+dfsg-2` -> `2.25.1+dfsg`;
+    `1.8.0~rc1-1` -> `1.8.0rc1` (Debian marks pre-releases with `~`).
     """
-    version = debian_version.split(":", 1)[-1].rsplit("-", 1)[0]
+    version = debian_version.split(":", 1)[-1].rsplit("-", 1)[0].replace("~", "")
     try:
         return str(Version(version))
     except InvalidVersion:
