@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>pkg_app</name>
+  <version>0.0.1</version>
+  <description>fixture</description>
+  <maintainer email="dev@example.com">dev</maintainer>
+  <license>MIT</license>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <depend>pkg_msgs</depend>
+  <depend>rclcpp_components</depend>
+</package>

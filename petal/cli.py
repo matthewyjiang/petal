@@ -26,9 +26,9 @@ from petal.config import (
 from petal.discover.workspace import discover_workspace
 from petal.identity import pip_name
 from petal.installer import InstallerError, execute, uninstall, write_lock
-from petal.models import Dep, Source
+from petal.models import Dep, ResolvedDep, Source
 from petal.planner import PlannerConflict, build_plan
-from petal.resolve.manager import ResolutionManager
+from petal.resolve.manager import ResolutionManager, UnresolvedDependencies
 from petal.status import check_status, print_report
 
 
@@ -73,14 +73,20 @@ def _cmd_clean(args: argparse.Namespace) -> int:
     return 0
 
 
-def _resolve_deps(manager: ResolutionManager, deps: list[Dep]) -> list:
+def _resolve_deps(manager: ResolutionManager, deps: list[Dep]) -> list[ResolvedDep]:
+    """Resolve every dep, raising UnresolvedDependencies if any has no source."""
     if hasattr(manager, "preload"):
         manager.preload()
     workers = max(1, min(8, len(deps)))
     if workers == 1:
-        return [item for dep in deps if (item := manager.resolve(dep))]
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        return [item for item in pool.map(manager.resolve, deps) if item]
+        results = [manager.resolve(dep) for dep in deps]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(manager.resolve, deps))
+    unresolved = [dep for dep, item in zip(deps, results) if item is None]
+    if unresolved:
+        raise UnresolvedDependencies(unresolved)
+    return [item for item in results if item is not None]
 
 
 def _load_lock_or_none(lock_path: Path):
@@ -234,8 +240,7 @@ def _rewrite_lock(
     discovered = discover_workspace(workspace)
     deps = [*manifest.deps, *discovered.deps]
     manager = ResolutionManager(ros_distro=distro, venv=venv)
-    resolved = [item for dep in deps if (item := manager.resolve(dep))]
-    plan = build_plan(resolved)
+    plan = build_plan(_resolve_deps(manager, deps))
     write_lock(
         workspace / "petal.lock", manifest_path, [*plan.distro, *plan.apt, *plan.pip]
     )
@@ -393,7 +398,12 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("petal: cancelled", file=sys.stderr)
         return 130
-    except (env.PetalEnvError, PlannerConflict, InstallerError) as exc:
+    except (
+        env.PetalEnvError,
+        PlannerConflict,
+        InstallerError,
+        UnresolvedDependencies,
+    ) as exc:
         print(f"petal: {exc}", file=sys.stderr)
         return 1
 

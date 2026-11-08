@@ -139,6 +139,8 @@ ml_collections = { pip = "ml-collections" }
 
 Resolution order: ROS/system modules, `rosdep`, apt (`python3-<name>`), then PyPI.
 
+`package.xml` keys resolve only through ROS/system modules and `rosdep`; Petal never guesses a PyPI name for them, and it skips packages that live in the workspace. An unresolvable key makes `petal sync` fail with a list of the keys it could not resolve. Fix it with `rosdep update` or an explicit `[overrides]` entry mapping the key to a pip or apt package.
+
 ## Colcon Verb
 
 If installed with `petal-ros[colcon]`, use:

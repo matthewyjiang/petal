@@ -471,6 +471,45 @@ def test_add_unresolvable_dep_errors_and_leaves_manifest(  # type: ignore[no-unt
     assert (tmp_path / "petal.toml").read_text(encoding="utf-8") == before
 
 
+def test_sync_fails_loudly_on_unresolvable_deps(  # type: ignore[no-untyped-def]
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
+    (tmp_path / "petal.toml").write_text(
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\n',
+        encoding="utf-8",
+    )
+    venv = tmp_path / ".petal" / "venv"
+    monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
+    rich = Dep("rich", ">=13", Source.PIP, ["pkg_a"])
+    typo = Dep("my_typo_dep", source_hint=Source.ROSDEP, origin_packages=["pkg_a"])
+    monkeypatch.setattr(
+        cli, "discover_workspace", lambda workspace: SimpleNamespace(deps=[rich, typo])
+    )
+
+    class FakeManager:
+        def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
+            pass
+
+        def resolve(self, dep: Dep) -> ResolvedDep | None:
+            return ResolvedDep(dep, Source.PIP) if dep is rich else None
+
+    def _must_not_run(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("must not install with unresolved deps")
+
+    monkeypatch.setattr(cli, "ResolutionManager", FakeManager)
+    monkeypatch.setattr(cli, "execute", _must_not_run)
+
+    rc = cli.main(["sync", "--workspace", str(tmp_path), "--yes"])
+
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "my_typo_dep (from pkg_a)" in err
+    assert "rich" not in err
+    assert "[overrides]" in err
+    assert not (tmp_path / "petal.lock").exists()
+
+
 def test_add_no_and_dry_run_do_not_update_manifest(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(

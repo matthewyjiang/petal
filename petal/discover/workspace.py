@@ -77,7 +77,9 @@ def _merge_deps(deps: list[Dep]) -> list[Dep]:
         existing = merged.get(key)
         if existing is None:
             merged[key] = Dep(
-                name=key,
+                # rosdep keys are exact (`ament_cmake` != `ament-cmake`); only
+                # Python distribution names get PEP 503 normalization.
+                name=dep.name if dep.source_hint == Source.ROSDEP else key,
                 version_spec=dep.version_spec,
                 source_hint=dep.source_hint,
                 origin_packages=list(dict.fromkeys(dep.origin_packages)),
@@ -90,6 +92,7 @@ def _merge_deps(deps: list[Dep]) -> list[Dep]:
             dict.fromkeys([*existing.origin_packages, *dep.origin_packages])
         )
         if existing.source_hint != dep.source_hint and dep.source_hint == Source.PIP:
+            existing.name = key
             existing.source_hint = Source.PIP
     return sorted(merged.values(), key=lambda d: d.name)
 
@@ -104,18 +107,25 @@ def discover_workspace(start: Path | None = None) -> WorkspaceDiscovery:
     by_package: dict[str, list[Dep]] = {}
     all_deps: list[Dep] = []
 
-    for package_xml in sorted(src.rglob("package.xml")):
-        package_dir = package_xml.parent
-        if _has_colcon_ignore(package_dir, src):
-            continue
-        origin = package_name(package_xml)
-        deps = parse_package_xml(package_xml)
+    packages = [
+        (package_xml.parent, package_name(package_xml))
+        for package_xml in sorted(src.rglob("package.xml"))
+        if not _has_colcon_ignore(package_xml.parent, src)
+    ]
+    # Packages built from this workspace are satisfied by colcon, not by a
+    # package manager. Resolving them externally would at best fail and at worst
+    # install an unrelated PyPI project that happens to share the name.
+    local_names = {pip_name(name) for _, name in packages}
+
+    for package_dir, origin in packages:
+        deps = parse_package_xml(package_dir / "package.xml")
         if (package_dir / "setup.cfg").exists():
             deps.extend(parse_setup_cfg(package_dir / "setup.cfg", origin))
         if (package_dir / "setup.py").exists():
             deps.extend(parse_setup_py(package_dir / "setup.py", origin))
         if (package_dir / "pyproject.toml").exists():
             deps.extend(parse_pyproject(package_dir / "pyproject.toml", origin))
+        deps = [dep for dep in deps if pip_name(dep.name) not in local_names]
         deps = _apply_overrides(deps, overrides)
         by_package[origin] = deps
         all_deps.extend(deps)

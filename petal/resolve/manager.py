@@ -1,3 +1,5 @@
+"""Dependency resolvers."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,6 +10,27 @@ from petal.resolve.base import Runner, default_runner
 from petal.resolve.distro import DistroResolver
 from petal.resolve.pip import PipResolver
 from petal.resolve.rosdep import RosdepResolver
+
+
+class UnresolvedDependencies(RuntimeError):
+    """Raised when workspace deps cannot be resolved from any allowed source."""
+
+    def __init__(self, deps: list[Dep]) -> None:
+        self.deps = deps
+        lines = [f"could not resolve {len(deps)} dependencies:"]
+        for dep in deps:
+            origins = ", ".join(dep.origin_packages) or "petal.toml"
+            lines.append(f"  {dep.name}{dep.version_spec} (from {origins})")
+        if any(dep.source_hint == Source.ROSDEP for dep in deps):
+            lines.extend(
+                [
+                    "package.xml keys resolve only through rosdep, never PyPI.",
+                    "run `rosdep update`, or map a key explicitly in petal.toml:",
+                    "  [overrides]",
+                    '  <key> = { pip = "<pypi-name>" }',
+                ]
+            )
+        super().__init__("\n".join(lines))
 
 
 class ResolutionManager:
@@ -46,7 +69,11 @@ class ResolutionManager:
         if hint == Source.DISTRO:
             return [self.distro]
         if hint == Source.ROSDEP:
-            return [self.distro, self.rosdep, self.pip]
+            # rosdep keys are not PyPI names. Never guess one on PyPI: an unknown
+            # key (typo, unreleased package, stale rosdep cache) would install
+            # whatever happens to be published under that name. Rosdep's own
+            # `pip:` rules still resolve to PIP via RosdepResolver.
+            return [self.distro, self.rosdep]
         if hint == Source.APT:
             return [self.apt]
         if hint == Source.PIP:

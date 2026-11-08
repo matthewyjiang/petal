@@ -75,3 +75,30 @@ def test_no_src_workspace_is_empty(tmp_path: Path) -> None:
     result = discover_workspace(tmp_path)
     assert result.deps == []
     assert result.by_package == {}
+
+
+def test_workspace_packages_are_not_external_deps() -> None:
+    result = discover_workspace(FIXTURES / "ws_local_deps")
+    names = {dep.name for dep in result.deps}
+
+    # pkg_msgs is built by colcon from this workspace, whether referenced as a
+    # package.xml key or as a PEP 503 variant in install_requires.
+    assert "pkg_msgs" not in names
+    assert "pkg-msgs" not in names
+    assert [dep.name for dep in result.by_package["pkg_app"]] == [
+        "rosidl_default_runtime",
+        "rclcpp_components",
+        "requests",
+    ]
+
+
+def test_rosdep_keys_keep_their_exact_spelling() -> None:
+    deps = dep_map(discover_workspace(FIXTURES / "ws_local_deps").deps)
+
+    assert set(deps) == {
+        "rclcpp_components",
+        "requests",
+        "rosidl_default_generators",
+        "rosidl_default_runtime",
+    }
+    assert deps["rclcpp_components"].source_hint == Source.ROSDEP

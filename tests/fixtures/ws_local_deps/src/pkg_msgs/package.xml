@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>pkg_msgs</name>
+  <version>0.0.1</version>
+  <description>fixture</description>
+  <maintainer email="dev@example.com">dev</maintainer>
+  <license>MIT</license>
+  <depend>rosidl_default_generators</depend>
+</package>

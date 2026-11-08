@@ -84,8 +84,13 @@ def manifest_hash(path: Path) -> str:
     return f"sha256:{digest}"
 
 
+# Bump when resolution rules change so `petal sync` stops reusing locks that
+# were resolved under the old rules. 2: rosdep keys no longer fall back to PyPI.
+_RESOLUTION_POLICY = "2"
+
+
 def dependency_hash(deps: list[Dep]) -> str:
-    lines = []
+    lines = [f"policy\t{_RESOLUTION_POLICY}"]
     for dep in sorted(
         deps,
         key=lambda item: (
