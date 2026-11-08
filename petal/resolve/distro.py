@@ -4,7 +4,6 @@ from petal import env
 from petal.models import Dep, ResolvedDep, Source
 from petal.resolve.base import canonical
 
-
 KNOWN_IMPORTS = {
     "opencv-python": "cv2",
     "pyyaml": "yaml",

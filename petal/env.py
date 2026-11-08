@@ -6,7 +6,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROS_ROOT = Path(os.environ.get("PETAL_ROS_ROOT", "/opt/ros"))
 
 
@@ -97,8 +96,7 @@ def python_version(interpreter: Path) -> str:
         ],
         check=True,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
     return proc.stdout.strip()
 
@@ -247,8 +245,7 @@ print('\\n'.join(mods))
         [str(interpreter), "-c", code],
         check=True,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         env=env,
     )
     return {line for line in proc.stdout.splitlines() if line}

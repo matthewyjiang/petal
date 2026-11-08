@@ -4,7 +4,8 @@ import hashlib
 import re
 from pathlib import Path
 
-from petal.identity import dep_key as canonical_dep_key, pip_name, python_apt_package
+from petal.identity import dep_key as canonical_dep_key
+from petal.identity import pip_name, python_apt_package
 
 try:
     import tomllib
@@ -12,7 +13,6 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 only
     import tomli as tomllib
 
 from petal.models import Dep, Lock, Manifest, ResolvedDep, Source
-
 
 _SECTION_RE = re.compile(r"^\s*\[[^\]]+\]\s*(?:#.*)?$")
 _KEY_RE = re.compile(r"^\s*(?P<key>[A-Za-z0-9_-]+|\"[^\"]+\")\s*=")
@@ -84,8 +84,13 @@ def manifest_hash(path: Path) -> str:
     return f"sha256:{digest}"
 
 
+# Bump when resolution rules change so `petal sync` stops reusing locks that
+# were resolved under the old rules. 2: rosdep keys no longer fall back to PyPI.
+_RESOLUTION_POLICY = "2"
+
+
 def dependency_hash(deps: list[Dep]) -> str:
-    lines = []
+    lines = [f"policy\t{_RESOLUTION_POLICY}"]
     for dep in sorted(
         deps,
         key=lambda item: (
@@ -201,6 +206,21 @@ def load_manifest(path: Path) -> Manifest:
         python_version=str(workspace.get("python_version", "")),
         deps=deps,
     )
+
+
+def load_lock_or_none(path: Path) -> Lock | None:
+    """Load petal.lock, or return None when it is missing or unreadable.
+
+    Callers treat an unusable lock as absent and re-resolve.
+    """
+    if not path.exists():
+        return None
+    try:
+        return load_lock(path)
+    except (OSError, ValueError, KeyError, TypeError):
+        # ValueError covers TOMLDecodeError and unknown sources; KeyError and
+        # TypeError cover entries missing fields or with the wrong shape.
+        return None
 
 
 def load_lock(path: Path) -> Lock:

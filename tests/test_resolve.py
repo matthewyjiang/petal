@@ -11,7 +11,6 @@ from petal.resolve.manager import ResolutionManager
 from petal.resolve.pip import PipResolver, parse_pip_version
 from petal.resolve.rosdep import RosdepResolver, parse_rosdep_resolve
 
-
 FIXTURES = Path(__file__).parent / "fixtures" / "cmd_output"
 
 
@@ -145,3 +144,22 @@ def test_resolution_manager_order_and_cache(tmp_path: Path) -> None:
     assert ml is not None and ml.chosen_source == Source.PIP
     assert again is ml
     assert calls.count(["apt-cache", "policy", "python3-ml-collections"]) == 1
+
+
+def test_unknown_rosdep_key_is_never_looked_up_on_pypi(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(cmd)
+        if cmd[0] == "rosdep":
+            return completed(cmd, fixture("rosdep_missing.txt"), returncode=1)
+        # A squatted PyPI project would happily "resolve" here.
+        return completed(cmd, "my-typo-dep==6.6.6\n")
+
+    manager = ResolutionManager(
+        ros_distro="humble", venv=tmp_path / "venv", modules=set(), runner=runner
+    )
+
+    dep = Dep("my_typo_dep", source_hint=Source.ROSDEP, origin_packages=["pkg_a"])
+    assert manager.resolve(dep) is None
+    assert calls == [["rosdep", "resolve", "my_typo_dep", "--rosdistro", "humble"]]
