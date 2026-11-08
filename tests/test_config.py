@@ -78,11 +78,11 @@ def test_workspace_root_prefers_petal_toml_over_nearer_src(tmp_path: Path) -> No
     assert find_workspace_root(nested) == tmp_path
 
 
-def test_workspace_root_ignores_a_petal_toml_above_another_workspace(
+def test_workspace_root_prefers_petal_toml_over_a_src_layout_subtree(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "petal.toml").write_text("[deps]\n", encoding="utf-8")  # stray
-    ws = tmp_path / "ws2"
-    (ws / "src" / "pkg").mkdir(parents=True)
+    (tmp_path / "petal.toml").write_text("[deps]\n", encoding="utf-8")
+    webui = tmp_path / "tools" / "webui"
+    (webui / "src").mkdir(parents=True)
 
-    assert find_workspace_root(ws / "src" / "pkg") == ws
+    assert find_workspace_root(webui) == tmp_path

@@ -21,26 +21,19 @@ _KEY_RE = re.compile(r"^\s*(?P<key>[A-Za-z0-9_-]+|\"[^\"]+\")\s*=")
 def find_workspace_root(start: Path | None = None) -> Path:
     """The workspace containing `start` (default: cwd).
 
-    The nearest ancestor with a `src/` directory that is not itself a ROS
-    package (ament_cmake packages have their own `src/`), unless an ancestor
-    with petal.toml contains it under its own `src/`: that is a vendored
-    workspace, and the one with petal.toml wins.
+    The nearest ancestor with petal.toml, like git or cargo. Without one, the
+    nearest ancestor with a `src/` directory that is not itself a ROS package:
+    ament_cmake packages have their own `src/`.
     """
     current = (start or Path.cwd()).resolve()
-    candidate: Path | None = None
-    for path in (current, *current.parents):
+    ancestors = (current, *current.parents)
+    for path in ancestors:
         if (path / "petal.toml").is_file():
-            # A src/ workspace vendored inside this one belongs to it.
-            if candidate is None or candidate.is_relative_to(path / "src"):
-                return path
-            return candidate
-        if (
-            candidate is None
-            and (path / "src").is_dir()
-            and not (path / "package.xml").is_file()
-        ):
-            candidate = path
-    return candidate or current
+            return path
+    for path in ancestors:
+        if (path / "src").is_dir() and not (path / "package.xml").is_file():
+            return path
+    return current
 
 
 def write_manifest(path: Path, *, ros_distro: str, python_version: str) -> None:
