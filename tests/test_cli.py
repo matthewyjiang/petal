@@ -524,7 +524,7 @@ def test_add_updates_manifest_and_syncs_workspace(monkeypatch, tmp_path: Path) -
         )
         == 0
     )
-    assert 'rich = { pip = ">=13" }' in (tmp_path / "petal.toml").read_text(
+    assert 'rich = {pip = ">=13"}' in (tmp_path / "petal.toml").read_text(
         encoding="utf-8"
     )
     assert executed["venv"] == venv
@@ -561,7 +561,7 @@ def test_add_apt_uses_spec_as_package(monkeypatch, tmp_path: Path) -> None:  # t
         )
         == 0
     )
-    assert 'opencv = { apt = "python3-opencv" }' in (tmp_path / "petal.toml").read_text(
+    assert 'opencv = {apt = "python3-opencv"}' in (tmp_path / "petal.toml").read_text(
         encoding="utf-8"
     )
 
@@ -842,36 +842,6 @@ def test_remove_uninstall_failure_preserves_manifest(
     assert "rich" in manifest.read_text(encoding="utf-8")
     assert "petal: uninstall failed" in capsys.readouterr().err
     assert not (tmp_path / "petal.lock").exists()
-
-
-def test_remove_single_quoted_manifest_key_fails_before_uninstalling(
-    monkeypatch, tmp_path: Path, capsys
-) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr(preflight, "check", _ok_preflight)
-    manifest = tmp_path / "petal.toml"
-    original = "[workspace]\nros_distro = 'humble'\npython_version = '3.10'\n\n[deps]\n'rich' = '>=13'\n"
-    manifest.write_text(original, encoding="utf-8")
-    venv = tmp_path / ".petal" / "venv"
-    calls = {}
-    monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
-
-    def fake_uninstall(name: str, got_venv: Path, *, dry_run: bool) -> None:
-        calls["uninstall"] = (name, got_venv, dry_run)
-
-    monkeypatch.setattr(cli, "uninstall", fake_uninstall)
-    monkeypatch.setattr(
-        cli,
-        "_workspace_plan",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError),
-    )
-
-    assert cli.main(["remove", "rich", "--workspace", str(tmp_path)]) == 1
-    assert "uninstall" not in calls
-    assert manifest.read_text(encoding="utf-8") == original
-    assert (
-        "petal: could not remove rich from petal.toml; nothing uninstalled"
-        in capsys.readouterr().err
-    )
 
 
 def test_remove_missing_dep_is_noop(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]

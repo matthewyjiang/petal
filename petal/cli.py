@@ -8,11 +8,6 @@ from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 only
-    import tomli as tomllib
-
 from petal import env, preflight
 from petal.config import (
     add_manifest_dep,
@@ -20,6 +15,7 @@ from petal.config import (
     load_lock_or_none,
     load_manifest,
     lock_stamp,
+    manifest_has_dep,
     remove_manifest_dep,
     write_manifest,
 )
@@ -270,7 +266,7 @@ def _cmd_remove(args: argparse.Namespace) -> int:
     manifest = load_manifest(manifest_path)
     distro = manifest.ros_distro or env.detect_ros_distro()
     venv = env.ensure_venv(workspace, distro)
-    if not _manifest_has_dep_key(manifest_path, args.name):
+    if not manifest_has_dep(manifest_path, args.name):
         print(f"{args.name} not present in petal.toml")
         return 0
 
@@ -279,10 +275,7 @@ def _cmd_remove(args: argparse.Namespace) -> int:
         return 0
 
     original = manifest_path.read_bytes()
-    if not remove_manifest_dep(manifest_path, args.name):
-        raise InstallerError(
-            f"could not remove {args.name} from petal.toml; nothing uninstalled"
-        )
+    remove_manifest_dep(manifest_path, args.name)
     try:
         # Same ordering as add: validate the post-change workspace first.
         inputs = _load_inputs(workspace, manifest_path, distro)
@@ -295,15 +288,6 @@ def _cmd_remove(args: argparse.Namespace) -> int:
         raise
     write_lock(workspace / "petal.lock", inputs.stamp, plan.items())
     return 0
-
-
-def _manifest_has_dep_key(manifest_path: Path, name: str) -> bool:
-    data = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
-    deps = data.get("deps", {}) or {}
-    if not isinstance(deps, dict):
-        return False
-    key = pip_name(name)
-    return any(pip_name(str(dep_name)) == key for dep_name in deps)
 
 
 def _cmd_status(args: argparse.Namespace) -> int:

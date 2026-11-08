@@ -5,6 +5,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+import tomlkit
+
 from petal.config import load_lock_or_none
 from petal.identity import lock_key, pip_name
 from petal.models import LockStamp, ResolvedDep, Source
@@ -122,15 +124,15 @@ def execute(
 
 
 def write_lock(lock_path: Path, stamp: LockStamp, resolved: list[ResolvedDep]) -> None:
-    lines = [
-        f'manifest_hash = "{stamp.manifest_hash}"',
-        f'dependency_hash = "{stamp.dependency_hash}"',
-        f'generated_at = "{datetime.now(timezone.utc).isoformat()}"',
-        "",
-    ]
+    doc = tomlkit.document()
+    doc["manifest_hash"] = stamp.manifest_hash
+    doc["dependency_hash"] = stamp.dependency_hash
+    doc["generated_at"] = datetime.now(timezone.utc).isoformat()
+    entries = tomlkit.aot()
     for item in resolved:
-        lines.extend(_lock_entry(item))
-    lock_path.write_text("\n".join(lines), encoding="utf-8")
+        entries.append(_lock_entry(item))
+    doc["resolved"] = entries
+    lock_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
 
 
 def _write_lock_if_changed(
@@ -190,24 +192,19 @@ def uninstall(
         raise InstallerError(pip_proc.stderr or proc.stderr or "pip uninstall failed")
 
 
-def _lock_entry(item: ResolvedDep) -> list[str]:
+def _lock_entry(item: ResolvedDep) -> dict[str, str]:
     """One `[[resolved]]` table. System entries carry no version so the lock does
     not change with whichever machine resolved it."""
-    lines = [
-        "[[resolved]]",
-        f'name = "{item.dep.name}"',
-        f'source = "{item.chosen_source.value}"',
-    ]
+    entry = {"name": item.dep.name, "source": item.chosen_source.value}
     if item.dep.version_spec:
-        lines.append(f'spec = "{item.dep.version_spec}"')
+        entry["spec"] = item.dep.version_spec
     if item.dep.source_hint:
-        lines.append(f'hint = "{item.dep.source_hint.value}"')
+        entry["hint"] = item.dep.source_hint.value
     if item.apt_pkg:
-        lines.append(f'apt_pkg = "{item.apt_pkg}"')
+        entry["apt_pkg"] = item.apt_pkg
     if item.resolved_version and item.chosen_source != Source.DISTRO:
-        lines.append(f'version = "{item.resolved_version}"')
-    lines.append("")
-    return lines
+        entry["version"] = item.resolved_version
+    return entry
 
 
 def _pip_requirement(item: ResolvedDep) -> str:

@@ -5,6 +5,15 @@ from pathlib import Path
 from petal.config import add_manifest_dep, find_workspace_root, remove_manifest_dep
 from petal.models import Source
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 only
+    import tomli as tomllib
+
+
+def toml(path: Path) -> dict:
+    return tomllib.loads(path.read_text(encoding="utf-8"))
+
 
 def test_add_manifest_dep_preserves_overrides(tmp_path: Path) -> None:
     manifest = tmp_path / "petal.toml"
@@ -24,7 +33,8 @@ def test_add_manifest_dep_preserves_overrides(tmp_path: Path) -> None:
     add_manifest_dep(manifest, "rich", version_spec=">=13", source_hint=Source.PIP)
 
     text = manifest.read_text(encoding="utf-8")
-    assert 'rich = { pip = ">=13" }' in text
+    assert toml(manifest)["deps"] == {"numpy": ">=1.24", "rich": {"pip": ">=13"}}
+    # Untouched sections keep their exact formatting.
     assert '[overrides]\nml_collections = { pip = "ml-collections" }' in text
 
 
@@ -46,7 +56,7 @@ def test_add_manifest_dep_renders_apt_default(tmp_path: Path) -> None:
 
     add_manifest_dep(manifest, "numpy", source_hint=Source.APT)
 
-    assert 'numpy = { apt = "python3-numpy" }' in manifest.read_text(encoding="utf-8")
+    assert toml(manifest)["deps"] == {"numpy": {"apt": "python3-numpy"}}
 
 
 def test_remove_manifest_dep_uses_canonical_key(tmp_path: Path) -> None:
@@ -86,3 +96,30 @@ def test_workspace_root_prefers_petal_toml_over_a_src_layout_subtree(
     (webui / "src").mkdir(parents=True)
 
     assert find_workspace_root(webui) == tmp_path
+
+
+def test_manifest_edits_handle_any_toml_key_quoting(tmp_path: Path) -> None:
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text(
+        "[deps]\n'rich' = '>=13'  # pinned for the TUI\n\"opencv-python\" = \"*\"\n",
+        encoding="utf-8",
+    )
+
+    add_manifest_dep(manifest, "rich", version_spec=">=14")
+    assert remove_manifest_dep(manifest, "opencv_python") is True
+
+    text = manifest.read_text(encoding="utf-8")
+    assert toml(manifest)["deps"] == {"rich": ">=14"}
+    assert "opencv" not in text
+
+
+def test_add_manifest_dep_creates_deps_table(tmp_path: Path) -> None:
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text('[workspace]\nros_distro = "humble"\n', encoding="utf-8")
+
+    add_manifest_dep(manifest, 'weird"name', version_spec="==1")
+
+    assert toml(manifest) == {
+        "workspace": {"ros_distro": "humble"},
+        "deps": {'weird"name': "==1"},
+    }
