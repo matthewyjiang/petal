@@ -20,6 +20,9 @@ class Plan:
     pip: list[ResolvedDep] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
+    def items(self) -> list[ResolvedDep]:
+        return [*self.distro, *self.apt, *self.pip]
+
 
 @dataclass
 class _Bounds:

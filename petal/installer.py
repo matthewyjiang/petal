@@ -5,14 +5,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from petal.config import (
-    dependency_hash,
-    load_lock,
-    load_lock_or_none,
-    manifest_hash,
-)
+from petal.config import load_lock, load_lock_or_none
 from petal.identity import lock_key, pip_name
-from petal.models import ResolvedDep, Source
+from petal.models import LockStamp, ResolvedDep, Source
 from petal.planner import Plan
 from petal.resolve.base import (
     Runner,
@@ -23,7 +18,7 @@ from petal.resolve.base import (
     venv_python,
 )
 from petal.resolve.pip import Pin, PipCompileError, compile_requirements
-from petal.system import NO_SYSTEM, SystemView
+from petal.system import SystemView
 
 
 class InstallerError(RuntimeError):
@@ -34,63 +29,59 @@ def execute(
     plan: Plan,
     venv: Path,
     *,
+    system: SystemView,
     frozen: bool = False,
     dry_run: bool = False,
-    workspace_root: Path | None = None,
-    manifest_path: Path | None = None,
+    lock_path: Path | None = None,
+    stamp: LockStamp | None = None,
     runner: Runner = default_runner,
     install_runner: StreamRunner = default_stream_runner,
     assume_yes: bool = False,
     assume_no: bool = False,
-    system: SystemView = NO_SYSTEM,
 ) -> bool:
-    """Install what `plan` needs; returns False when nothing was applied.
+    """Install what `plan` needs, then record it in `lock_path` stamped `stamp`.
 
     Pip packages are installed as a fully resolved closure with `--no-deps`,
     skipping anything the ROS/system Python provides, so the venv never holds a
     copy that shadows a system package (unless the user explicitly allowed it).
+    The closure is resolved before anything is installed. Returns False when
+    nothing was applied (dry run or cancelled).
     """
     if frozen:
-        if not workspace_root:
-            raise InstallerError("frozen install requires workspace root")
-        lock_path = workspace_root / "petal.lock"
-        if not lock_path.exists():
+        if lock_path is None or not lock_path.exists():
             raise InstallerError("petal.lock missing; run `petal sync` first")
-        _check_frozen(lock_path, [*plan.distro, *plan.apt, *plan.pip])
+        _check_frozen(lock_path, plan.items())
 
     for warning in plan.warnings:
         print(f"warning: {warning}")
 
     apt_pkgs = [item.apt_pkg for item in plan.apt if item.apt_pkg]
     pip_reqs = [_pip_requirement(item) for item in plan.pip]
-    distro_names = [item.dep.name for item in plan.distro]
+    planned = plan.items()
+    installed = _pip_versions(venv, runner) if plan.pip or plan.distro else {}
+    missing_pip = _missing_pip(plan.pip, installed)
+    pins = (
+        _pip_closure(pip_reqs, venv, system, runner, installed) if missing_pip else []
+    )
 
     if dry_run:
         _print_plan(plan, venv)
-        pins = _pip_closure(pip_reqs, venv, system, runner, installed={})
         _print_dry_run(apt_pkgs, [pin.requirement for pin in pins], venv, system)
         return False
 
-    missing_apt = [pkg for pkg in apt_pkgs if not _apt_installed(pkg, runner)]
-    installed = _pip_versions(venv, runner) if plan.pip else {}
     _warn_shadowing(installed, system)
-    missing_pip = _missing_pip(plan.pip, installed)
-    will_install = bool(missing_apt or missing_pip)
+    missing_apt = [pkg for pkg in apt_pkgs if not _apt_installed(pkg, runner)]
 
-    if not will_install:
-        if distro_names or apt_pkgs or pip_reqs:
+    if not missing_apt and not pins:
+        if planned:
             print("petal: all dependencies already satisfied")
         else:
             print("petal: no dependencies to install")
-        if workspace_root and manifest_path:
-            _write_lock_if_changed(
-                workspace_root / "petal.lock",
-                manifest_path,
-                [*plan.distro, *plan.apt, *plan.pip],
-            )
+        if lock_path and stamp:
+            _write_lock_if_changed(lock_path, stamp, planned)
         return True
 
-    _print_changes(plan, missing_apt, missing_pip, venv)
+    _print_changes(plan, missing_apt, pins)
 
     if not _confirm_install(assume_yes=assume_yes, assume_no=assume_no):
         print("petal: install cancelled")
@@ -108,41 +99,31 @@ def execute(
             raise
         if proc.returncode != 0:
             raise InstallerError(proc.stderr or "apt install failed")
+        if pins and system.refresh():
+            # New python3-* debs changed what the system provides.
+            pins = _pip_closure(pip_reqs, venv, system, runner, installed)
     elif apt_pkgs:
         print("APT: already installed " + ", ".join(apt_pkgs))
 
-    if missing_pip:
-        if missing_apt:
-            # New python3-* debs change what the system provides.
-            system.refresh()
-        pins = _pip_closure(pip_reqs, venv, system, runner, installed)
-        if pins:
-            reqs = [pin.requirement for pin in pins]
-            print("PIP: installing " + ", ".join(reqs))
-            proc = install_runner(pip_install_command(venv, system, reqs))
-            if proc.returncode != 0:
-                raise InstallerError(proc.stderr or "pip install failed")
+    if pins:
+        reqs = [pin.requirement for pin in pins]
+        print("PIP: installing " + ", ".join(reqs))
+        proc = install_runner(pip_install_command(venv, system, reqs))
+        if proc.returncode != 0:
+            raise InstallerError(proc.stderr or "pip install failed")
 
-    if not distro_names and not apt_pkgs and not pip_reqs:
-        print("petal: no dependencies to install")
-
-    if workspace_root and manifest_path:
-        write_lock(
-            workspace_root / "petal.lock",
-            manifest_path,
-            [*plan.distro, *plan.apt, *plan.pip],
-        )
-        print(f"lock: wrote {workspace_root / 'petal.lock'}")
+    if lock_path and stamp:
+        write_lock(lock_path, stamp, planned)
+        print(f"lock: wrote {lock_path}")
 
     return True
 
 
-def write_lock(
-    lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]
-) -> None:
+def write_lock(lock_path: Path, stamp: LockStamp, resolved: list[ResolvedDep]) -> None:
     lines = [
-        f'manifest_hash = "{manifest_hash(manifest_path)}"',
-        f'dependency_hash = "{dependency_hash([item.dep for item in resolved])}"',
+        f'manifest_hash = "{stamp.manifest_hash}"',
+        f'dependency_hash = "{stamp.dependency_hash}"',
+        f'system_hash = "{stamp.system_hash}"',
         f'generated_at = "{datetime.now(timezone.utc).isoformat()}"',
         "",
     ]
@@ -152,24 +133,20 @@ def write_lock(
 
 
 def _write_lock_if_changed(
-    lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]
+    lock_path: Path, stamp: LockStamp, resolved: list[ResolvedDep]
 ) -> None:
-    if _lock_matches(lock_path, manifest_path, resolved):
+    if _lock_matches(lock_path, stamp, resolved):
         print("lock: unchanged")
         return
-    write_lock(lock_path, manifest_path, resolved)
+    write_lock(lock_path, stamp, resolved)
     print(f"lock: wrote {lock_path}")
 
 
 def _lock_matches(
-    lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]
+    lock_path: Path, stamp: LockStamp, resolved: list[ResolvedDep]
 ) -> bool:
     lock = load_lock_or_none(lock_path)
-    if lock is None:
-        return False
-    if lock.manifest_hash != manifest_hash(manifest_path):
-        return False
-    if lock.dependency_hash != dependency_hash([item.dep for item in resolved]):
+    if lock is None or lock.stamp != stamp:
         return False
     locked = {_frozen_key(item): item for item in lock.resolved}
     planned = {_frozen_key(item): item for item in resolved}
@@ -230,11 +207,12 @@ def _pip_requirement(item: ResolvedDep) -> str:
 
 def pip_install_command(venv: Path, system: SystemView, reqs: list[str]) -> list[str]:
     """`uv pip install` for an already-resolved closure, guarded by system pins."""
-    cmd = ["uv", "pip", "install", "--python", str(venv_python(venv)), "--no-deps"]
-    constraints = system.constraints_file()
-    if constraints is not None:
-        cmd += ["--constraints", str(constraints)]
-    return [*cmd, *reqs]
+    python = str(venv_python(venv))
+    return [
+        *("uv", "pip", "install", "--python", python, "--no-deps"),
+        *system.constraint_args(),
+        *reqs,
+    ]
 
 
 def _pip_closure(
@@ -261,12 +239,11 @@ def _pip_closure(
 
 def _warn_shadowing(installed: dict[str, str], system: SystemView) -> None:
     """Flag venv copies of system packages, e.g. left by older petal versions."""
-    for name, version in sorted(installed.items()):
-        if system.protects(name):
-            print(
-                f"warning: .petal/venv has {name} {version}, shadowing the system's "
-                f"{system.version(name)}; run `petal clean && petal sync` to drop it"
-            )
+    for name, version in sorted(system.shadowed_by(installed).items()):
+        print(
+            f"warning: .petal/venv has {name} {version}, shadowing the system's "
+            f"{system.version(name)}; run `petal clean && petal sync` to drop it"
+        )
 
 
 def _missing_pip(
@@ -297,7 +274,7 @@ def _pip_versions(venv: Path, runner: Runner) -> dict[str, str]:
 
 
 def _print_plan(plan: Plan, venv: Path) -> None:
-    items = [*plan.distro, *plan.apt, *plan.pip]
+    items = plan.items()
     if not items:
         return
     print(f"Resolved {len(items)} dependencies:")
@@ -316,15 +293,14 @@ def _print_plan(plan: Plan, venv: Path) -> None:
         )
 
 
-def _print_changes(
-    plan: Plan, missing_apt: list[str], missing_pip: list[ResolvedDep], venv: Path
-) -> None:
-    change_count = len(missing_apt) + len(missing_pip)
+def _print_changes(plan: Plan, missing_apt: list[str], pins: list[Pin]) -> None:
+    change_count = len(missing_apt) + len(pins)
     noun = "change" if change_count == 1 else "changes"
+    pin_names = {pin.name for pin in pins}
     satisfied = (
         len(plan.distro)
         + (len(plan.apt) - len(missing_apt))
-        + (len(plan.pip) - len(missing_pip))
+        + sum(1 for item in plan.pip if pip_name(item.dep.name) not in pin_names)
     )
     print(f"{change_count} {noun} to apply  ·  {satisfied} already satisfied")
     if missing_apt:
@@ -336,10 +312,10 @@ def _print_changes(
                 print(
                     f"    {item.dep.name} -> {item.apt_pkg or item.dep.name}{version}"
                 )
-    if missing_pip:
+    if pins:
         print("  pip:")
-        for item in missing_pip:
-            print(f"    {item.dep.name} -> {_pip_requirement(item)}")
+        for pin in pins:
+            print(f"    {pin.requirement}")
 
 
 def _confirm_install(*, assume_yes: bool, assume_no: bool) -> bool:

@@ -54,9 +54,10 @@ def check_status(
             actual = pip_versions.get(pip_name(name), "")
             _bucket(report, name, actual, item.resolved_version)
         elif item.chosen_source == Source.DISTRO:
-            if item.resolved_version:
-                # Locked from distribution metadata: compare versions.
-                actual = _distribution_version(name, venv, runner)
+            # Python distributions have metadata; ROS packages such as rclpy
+            # often do not, so fall back to importing them.
+            actual = _distribution_version(name, venv, runner)
+            if actual:
                 _bucket(report, name, actual, item.resolved_version)
             elif _python_importable(name, venv, runner):
                 report.in_sync.append(name)
@@ -78,8 +79,8 @@ def print_report(report: StatusReport) -> None:
     if report.ok:
         return
 
-    if report.manifest_changed:
-        print("  run `petal sync` to update the lock")
+    if report.manifest_changed or report.drifted:
+        print("  run `petal sync` to update the lock and environment")
     if report.drifted:
         print("  drifted:")
         for item in report.drifted:

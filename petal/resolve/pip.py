@@ -1,3 +1,5 @@
+"""PyPI resolution through `uv pip compile`, always pinned to the system's copies."""
+
 from __future__ import annotations
 
 import re
@@ -5,8 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from petal.identity import pip_name
-from petal.models import Dep, ResolvedDep, Source
-from petal.resolve.base import Runner, default_runner, dep_requirement, venv_python
+from petal.resolve.base import Runner, venv_python
 from petal.system import SystemView
 
 
@@ -23,41 +24,21 @@ class Pin:
     requirement: str  # the line itself, ready for `uv pip install`
 
 
-class PipResolver:
-    """Resolves deps on PyPI with `uv pip compile`, pinned to the system's copies."""
-
-    def __init__(
-        self, venv: Path, system: SystemView, runner: Runner = default_runner
-    ) -> None:
-        self.venv = venv
-        self.system = system
-        self.runner = runner
-        # Requirement -> why uv could not resolve it, for error reporting.
-        self.failures: dict[str, str] = {}
-
-    def resolve(self, dep: Dep) -> ResolvedDep | None:
-        requirement = dep_requirement(dep)
-        try:
-            pins = compile_requirements(
-                [requirement], self.venv, self.system, self.runner
-            )
-        except PipCompileError as exc:
-            self.failures[requirement] = str(exc)
-            return None
-        key = pip_name(dep.name)
-        version = next((pin.version for pin in pins if pin.name == key), "")
-        return ResolvedDep(dep=dep, chosen_source=Source.PIP, resolved_version=version)
-
-
 def compile_requirements(
     requirements: list[str], venv: Path, system: SystemView, runner: Runner
 ) -> list[Pin]:
     """Resolve requirements and their whole dependency closure, honoring system pins."""
-    cmd = ["uv", "pip", "compile", "--python", str(venv_python(venv))]
-    constraints = system.constraints_file()
-    if constraints is not None:
-        cmd += ["--constraints", str(constraints)]
-    cmd += ["--no-header", "--no-annotate", "-"]
+    cmd = [
+        "uv",
+        "pip",
+        "compile",
+        "--python",
+        str(venv_python(venv)),
+        *system.constraint_args(),
+        "--no-header",
+        "--no-annotate",
+        "-",
+    ]
     proc = runner(cmd, input="".join(f"{req}\n" for req in requirements))
     if proc.returncode != 0:
         raise PipCompileError((proc.stderr or "uv pip compile failed").strip())

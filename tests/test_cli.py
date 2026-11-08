@@ -4,14 +4,42 @@ from importlib import metadata
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from petal import cli, env, preflight
+from petal.config import lock_stamp
 from petal.installer import InstallerError, write_lock
 from petal.models import Dep, ResolvedDep, Source
 from petal.planner import Plan
+from petal.resolve.manager import Unresolved, UnresolvedDependencies
+from petal.system import SystemPython, SystemView
 
 
 def _ok_preflight():
     return preflight.PreflightReport()
+
+
+@pytest.fixture(autouse=True)
+def _no_ros_python(monkeypatch):  # type: ignore[no-untyped-def]
+    """The CLI inspects the ROS interpreter; tests run without one."""
+    monkeypatch.setattr(cli, "inspect_system_python", lambda distro: SystemPython())
+
+
+EMPTY_SYSTEM_HASH = SystemView(SystemPython, constraints_path=None).fingerprint()
+
+
+class FakeManagerBase:
+    """Mirrors ResolutionManager.resolve_all on top of a per-dep `resolve`."""
+
+    def resolve(self, dep: Dep) -> ResolvedDep | None:
+        raise NotImplementedError
+
+    def resolve_all(self, deps: list[Dep]) -> list[ResolvedDep]:
+        results = [(dep, self.resolve(dep)) for dep in deps]
+        failures = [Unresolved(dep) for dep, item in results if item is None]
+        if failures:
+            raise UnresolvedDependencies(failures)
+        return [item for _, item in results if item is not None]
 
 
 def test_init_writes_manifest_and_creates_venv(
@@ -46,7 +74,7 @@ def test_sync_dry_run_orchestrates_resolution(monkeypatch, tmp_path: Path) -> No
         cli, "discover_workspace", lambda workspace, **kwargs: SimpleNamespace(deps=[])
     )
 
-    class FakeManager:
+    class FakeManager(FakeManagerBase):
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
             assert kwargs["ros_distro"] == "humble"
             assert kwargs["venv"] == venv
@@ -82,7 +110,7 @@ def test_sync_uses_current_lock_without_resolving(monkeypatch, tmp_path: Path) -
     venv = tmp_path / ".petal" / "venv"
     write_lock(
         tmp_path / "petal.lock",
-        manifest,
+        lock_stamp(manifest, [Dep("rich", ">=13")], EMPTY_SYSTEM_HASH),
         [ResolvedDep(Dep("rich", ">=13"), Source.PIP, resolved_version="13.7.0")],
     )
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
@@ -90,7 +118,7 @@ def test_sync_uses_current_lock_without_resolving(monkeypatch, tmp_path: Path) -
         cli, "discover_workspace", lambda workspace, **kwargs: SimpleNamespace(deps=[])
     )
 
-    class FakeManager:
+    class FakeManager(FakeManagerBase):
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
             raise AssertionError("sync should use the current lock")
 
@@ -124,11 +152,8 @@ def test_sync_falls_back_when_lock_is_corrupt(monkeypatch, tmp_path: Path) -> No
 
     resolved_names = []
 
-    class FakeManager:
+    class FakeManager(FakeManagerBase):
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
-            pass
-
-        def preload(self):  # type: ignore[no-untyped-def]
             pass
 
         def resolve(self, dep: Dep) -> ResolvedDep:
@@ -155,7 +180,7 @@ def test_sync_reresolves_when_discovered_deps_change(
     venv = tmp_path / ".petal" / "venv"
     write_lock(
         tmp_path / "petal.lock",
-        manifest,
+        lock_stamp(manifest, [Dep("rich", ">=13")], EMPTY_SYSTEM_HASH),
         [ResolvedDep(Dep("rich", ">=13"), Source.PIP, resolved_version="13.7.0")],
     )
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
@@ -167,11 +192,8 @@ def test_sync_reresolves_when_discovered_deps_change(
 
     resolved_names = []
 
-    class FakeManager:
+    class FakeManager(FakeManagerBase):
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
-            pass
-
-        def preload(self):  # type: ignore[no-untyped-def]
             pass
 
         def resolve(self, dep: Dep) -> ResolvedDep:
@@ -184,6 +206,46 @@ def test_sync_reresolves_when_discovered_deps_change(
 
     assert cli.main(["sync", "--workspace", str(tmp_path)]) == 0
     assert resolved_names == ["rich", "httpx"]
+
+
+def test_sync_reresolves_when_system_packages_change(
+    monkeypatch, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text(
+        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\nrich = ">=13"\n',
+        encoding="utf-8",
+    )
+    write_lock(
+        tmp_path / "petal.lock",
+        lock_stamp(manifest, [Dep("rich", ">=13")], EMPTY_SYSTEM_HASH),
+        [ResolvedDep(Dep("rich", ">=13"), Source.PIP, resolved_version="13.7.0")],
+    )
+    venv = tmp_path / ".petal" / "venv"
+    monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
+    monkeypatch.setattr(
+        cli, "discover_workspace", lambda workspace, **kwargs: SimpleNamespace(deps=[])
+    )
+    # e.g. `apt install python3-rich` since the lock was written
+    monkeypatch.setattr(
+        cli, "inspect_system_python", lambda distro: SystemPython({"rich": "13.9.4"})
+    )
+    resolved_names = []
+
+    class FakeManager(FakeManagerBase):
+        def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
+            pass
+
+        def resolve(self, dep: Dep) -> ResolvedDep:
+            resolved_names.append(dep.name)
+            return ResolvedDep(dep, Source.DISTRO, resolved_version="13.9.4")
+
+    monkeypatch.setattr(cli, "ResolutionManager", FakeManager)
+    monkeypatch.setattr(cli, "execute", lambda plan, got_venv, **kwargs: True)
+
+    assert cli.main(["sync", "--workspace", str(tmp_path)]) == 0
+    assert resolved_names == ["rich"]
 
 
 def test_sync_yes_and_no_flags_pass_prompt_overrides(
@@ -201,7 +263,7 @@ def test_sync_yes_and_no_flags_pass_prompt_overrides(
         cli, "discover_workspace", lambda workspace, **kwargs: SimpleNamespace(deps=[])
     )
 
-    class FakeManager:
+    class FakeManager(FakeManagerBase):
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
             pass
 
@@ -362,7 +424,7 @@ def test_add_updates_manifest_and_syncs_single_dep(monkeypatch, tmp_path: Path) 
     venv = tmp_path / ".petal" / "venv"
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
 
-    class FakeManager:
+    class FakeManager(FakeManagerBase):
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
             assert kwargs["ros_distro"] == "humble"
             assert kwargs["venv"] == venv
@@ -381,10 +443,10 @@ def test_add_updates_manifest_and_syncs_single_dep(monkeypatch, tmp_path: Path) 
         executed["plan"] = plan
         executed["venv"] = got_venv
         executed["dry_run"] = kwargs["dry_run"]
+        executed["lock_path"] = kwargs["lock_path"]
         return True
 
     monkeypatch.setattr(cli, "execute", fake_execute)
-    monkeypatch.setattr(cli, "_workspace_plan", lambda *args: Plan())
 
     assert (
         cli.main(
@@ -398,7 +460,7 @@ def test_add_updates_manifest_and_syncs_single_dep(monkeypatch, tmp_path: Path) 
     assert executed["venv"] == venv
     assert executed["dry_run"] is False
     assert executed["plan"].pip[0].resolved_version == "13.7.0"
-    assert (tmp_path / "petal.lock").exists()
+    assert executed["lock_path"] == tmp_path / "petal.lock"
 
 
 def test_add_apt_uses_spec_as_package(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
@@ -410,7 +472,7 @@ def test_add_apt_uses_spec_as_package(monkeypatch, tmp_path: Path) -> None:  # t
     venv = tmp_path / ".petal" / "venv"
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
 
-    class FakeManager:
+    class FakeManager(FakeManagerBase):
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
             pass
 
@@ -422,7 +484,6 @@ def test_add_apt_uses_spec_as_package(monkeypatch, tmp_path: Path) -> None:  # t
     monkeypatch.setattr(cli, "ResolutionManager", FakeManager)
     monkeypatch.setattr(cli, "build_plan", lambda resolved: Plan(apt=resolved))
     monkeypatch.setattr(cli, "execute", lambda plan, venv, **kwargs: True)
-    monkeypatch.setattr(cli, "_workspace_plan", lambda *args: Plan())
 
     assert (
         cli.main(
@@ -433,7 +494,6 @@ def test_add_apt_uses_spec_as_package(monkeypatch, tmp_path: Path) -> None:  # t
     assert 'opencv = { apt = "python3-opencv" }' in (tmp_path / "petal.toml").read_text(
         encoding="utf-8"
     )
-    assert (tmp_path / "petal.lock").exists()
 
 
 def test_add_unresolvable_dep_errors_and_leaves_manifest(  # type: ignore[no-untyped-def]
@@ -445,12 +505,9 @@ def test_add_unresolvable_dep_errors_and_leaves_manifest(  # type: ignore[no-unt
     venv = tmp_path / ".petal" / "venv"
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
 
-    class FakeManager:
+    class FakeManager(FakeManagerBase):
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
             pass
-
-        def failure_reason(self, dep: Dep) -> str:
-            return ""
 
         def resolve(self, dep: Dep) -> ResolvedDep | None:
             return None
@@ -460,12 +517,11 @@ def test_add_unresolvable_dep_errors_and_leaves_manifest(  # type: ignore[no-unt
 
     monkeypatch.setattr(cli, "ResolutionManager", FakeManager)
     monkeypatch.setattr(cli, "execute", _must_not_run)
-    monkeypatch.setattr(cli, "_workspace_plan", _must_not_run)
 
     rc = cli.main(["add", "nope-xyz123", "--workspace", str(tmp_path), "--yes"])
 
     assert rc == 1
-    assert "could not resolve 'nope-xyz123'" in capsys.readouterr().err
+    assert "nope-xyz123 (from petal.toml)" in capsys.readouterr().err
     assert (tmp_path / "petal.toml").read_text(encoding="utf-8") == before
 
 
@@ -487,12 +543,9 @@ def test_sync_fails_loudly_on_unresolvable_deps(  # type: ignore[no-untyped-def]
         lambda workspace, **kwargs: SimpleNamespace(deps=[rich, typo]),
     )
 
-    class FakeManager:
+    class FakeManager(FakeManagerBase):
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
             pass
-
-        def failure_reason(self, dep: Dep) -> str:
-            return ""
 
         def resolve(self, dep: Dep) -> ResolvedDep | None:
             return ResolvedDep(dep, Source.PIP) if dep is rich else None
@@ -528,12 +581,9 @@ def test_add_validates_whole_workspace_before_installing(  # type: ignore[no-unt
         lambda workspace, **kwargs: SimpleNamespace(deps=[typo]),
     )
 
-    class FakeManager:
+    class FakeManager(FakeManagerBase):
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
             pass
-
-        def failure_reason(self, dep: Dep) -> str:
-            return ""
 
         def resolve(self, dep: Dep) -> ResolvedDep | None:
             return None if dep is typo else ResolvedDep(dep, Source.PIP)
@@ -561,7 +611,7 @@ def test_add_no_and_dry_run_do_not_update_manifest(monkeypatch, tmp_path: Path) 
     venv = tmp_path / ".petal" / "venv"
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
 
-    class FakeManager:
+    class FakeManager(FakeManagerBase):
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
             pass
 
@@ -571,7 +621,6 @@ def test_add_no_and_dry_run_do_not_update_manifest(monkeypatch, tmp_path: Path) 
     monkeypatch.setattr(cli, "ResolutionManager", FakeManager)
     monkeypatch.setattr(cli, "build_plan", lambda resolved: Plan(pip=resolved))
     monkeypatch.setattr(cli, "execute", lambda plan, venv, **kwargs: False)
-    monkeypatch.setattr(cli, "_workspace_plan", lambda *args: Plan())
 
     assert cli.main(["add", "rich", "--workspace", str(tmp_path), "--no"]) == 0
     assert cli.main(["add", "httpx", "--workspace", str(tmp_path), "--dry-run"]) == 0
@@ -593,7 +642,7 @@ def test_add_cancel_does_not_update_manifest(
         env, "ensure_venv", lambda workspace, distro: tmp_path / ".petal" / "venv"
     )
 
-    class FakeManager:
+    class FakeManager(FakeManagerBase):
         def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
             pass
 
@@ -607,7 +656,6 @@ def test_add_cancel_does_not_update_manifest(
         "execute",
         lambda plan, venv, **kwargs: (_ for _ in ()).throw(KeyboardInterrupt),
     )
-    monkeypatch.setattr(cli, "_workspace_plan", lambda *args: Plan())
 
     assert cli.main(["add", "rich", "--workspace", str(tmp_path)]) == 130
     assert "rich" not in (tmp_path / "petal.toml").read_text(encoding="utf-8")
@@ -629,9 +677,9 @@ def test_remove_updates_manifest_uninstalls_and_rewrites_lock(
     def fake_uninstall(name, got_venv, **kwargs):  # type: ignore[no-untyped-def]
         calls["uninstall"] = (name, got_venv, kwargs["dry_run"])
 
-    def fake_plan(workspace, manifest_path, distro, manager):  # type: ignore[no-untyped-def]
-        assert "rich" not in manifest_path.read_text(encoding="utf-8")
-        calls["plan"] = workspace
+    def fake_plan(inputs, distro, venv):  # type: ignore[no-untyped-def]
+        assert [dep.name for dep in inputs.deps] == []
+        calls["plan"] = distro
         return Plan()
 
     monkeypatch.setattr(cli, "uninstall", fake_uninstall)
@@ -640,7 +688,7 @@ def test_remove_updates_manifest_uninstalls_and_rewrites_lock(
     assert cli.main(["remove", "rich", "--workspace", str(tmp_path)]) == 0
     assert "rich" not in (tmp_path / "petal.toml").read_text(encoding="utf-8")
     assert calls["uninstall"] == ("rich", venv, False)
-    assert calls["plan"] == tmp_path
+    assert calls["plan"] == "humble"
     assert (tmp_path / "petal.lock").exists()
 
 
@@ -661,7 +709,6 @@ def test_remove_apt_entry_by_manifest_key_uninstalls_and_rewrites_lock(
         calls["uninstall"] = (name, got_venv, dry_run)
 
     monkeypatch.setattr(cli, "uninstall", fake_uninstall)
-    monkeypatch.setattr(cli, "_workspace_plan", lambda *args: Plan())
 
     assert cli.main(["remove", "opencv", "--workspace", str(tmp_path)]) == 0
     manifest_text = manifest.read_text(encoding="utf-8")

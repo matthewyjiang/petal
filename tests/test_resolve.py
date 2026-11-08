@@ -3,12 +3,16 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from petal.models import Dep, Source
+import pytest
+from packaging.requirements import Requirement
+
+from petal.models import Dep, ResolvedDep, Source
+from petal.planner import PlannerConflict
 from petal.resolve.apt import AptResolver, _candidate_version
 from petal.resolve.base import canonical, python_apt_name
 from petal.resolve.distro import DistroResolver
-from petal.resolve.manager import ResolutionManager
-from petal.resolve.pip import PipResolver, parse_pins
+from petal.resolve.manager import ResolutionManager, Unresolved, UnresolvedDependencies
+from petal.resolve.pip import parse_pins
 from petal.resolve.rosdep import RosdepResolver, parse_rosdep_resolve
 from petal.system import SystemPython, SystemView
 
@@ -122,22 +126,21 @@ def test_parse_pins_reads_compile_output() -> None:
     assert pins[-1].requirement == "baz @ git+https://example.com/baz.git"
 
 
-def test_pip_resolver_compiles_against_system_constraints(tmp_path: Path) -> None:
-    constraints = tmp_path / ".petal" / "constraints.txt"
-    view = system({"numpy": "1.24.2"}, constraints_path=constraints)
+def manager_for(tmp_path: Path, view: SystemView, runner) -> ResolutionManager:  # type: ignore[no-untyped-def]
+    return ResolutionManager(
+        ros_distro="humble", venv=tmp_path / "venv", system=view, runner=runner
+    )
 
-    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
-        assert cmd[:3] == ["uv", "pip", "compile"]
-        assert cmd[cmd.index("--constraints") + 1] == str(constraints)
-        assert kwargs["input"] == "ml-collections>=0.1.1\n"
-        return completed(cmd, fixture("uv_compile_ml_collections.txt"))
 
-    dep = Dep("ml-collections", ">=0.1.1", Source.PIP)
-    resolved = PipResolver(tmp_path / "venv", view, runner).resolve(dep)
-    assert "numpy==1.24.2" in constraints.read_text(encoding="utf-8").splitlines()
-    assert resolved is not None
-    assert resolved.chosen_source == Source.PIP
-    assert resolved.resolved_version == "0.1.1"
+def uv_compile(cmd, kwargs, versions: dict[str, str]):  # type: ignore[no-untyped-def]
+    """Fake `uv pip compile`: pins each stdin requirement to `versions`."""
+    names = [Requirement(line).name for line in kwargs["input"].splitlines()]
+    return completed(cmd, "".join(f"{n}=={versions[n]}\n" for n in names))
+
+
+def resolve_one(manager: ResolutionManager, dep: Dep) -> ResolvedDep:
+    [resolved] = manager.resolve_all([dep])
+    return resolved
 
 
 def test_resolution_manager_order_and_cache(tmp_path: Path) -> None:
@@ -155,22 +158,22 @@ def test_resolution_manager_order_and_cache(tmp_path: Path) -> None:
             return completed(cmd, fixture("uv_compile_ml_collections.txt"))
         return completed(cmd, "", returncode=1)
 
-    manager = ResolutionManager(
-        ros_distro="humble",
-        venv=tmp_path / "venv",
-        system=system(modules={"rclpy"}),
-        runner=runner,
+    manager = manager_for(tmp_path, system(modules={"rclpy"}), runner)
+    ml = Dep("ml_collections", ">=0.1.1")
+    rclpy, numpy, ml_resolved, again = manager.resolve_all(
+        [
+            Dep("rclpy", source_hint=Source.ROSDEP),
+            Dep("numpy", source_hint=Source.ROSDEP),
+            ml,
+            ml,
+        ]
     )
 
-    rclpy = manager.resolve(Dep("rclpy", source_hint=Source.ROSDEP))
-    numpy = manager.resolve(Dep("numpy", source_hint=Source.ROSDEP))
-    ml = manager.resolve(Dep("ml_collections", ">=0.1.1"))
-    again = manager.resolve(Dep("ml_collections", ">=0.1.1"))
-
-    assert rclpy is not None and rclpy.chosen_source == Source.DISTRO
-    assert numpy is not None and numpy.chosen_source == Source.APT
-    assert ml is not None and ml.chosen_source == Source.PIP
-    assert again is ml
+    assert rclpy.chosen_source == Source.DISTRO
+    assert numpy.chosen_source == Source.APT
+    assert ml_resolved.chosen_source == Source.PIP
+    assert ml_resolved.resolved_version == "0.1.1"
+    assert again is ml_resolved
     assert calls.count(["apt-cache", "policy", "python3-ml-collections"]) == 1
 
 
@@ -184,30 +187,23 @@ def test_unknown_rosdep_key_is_never_looked_up_on_pypi(tmp_path: Path) -> None:
         # A squatted PyPI project would happily "resolve" here.
         return completed(cmd, "my-typo-dep==6.6.6\n")
 
-    manager = ResolutionManager(
-        ros_distro="humble", venv=tmp_path / "venv", system=system(), runner=runner
-    )
-
     dep = Dep("my_typo_dep", source_hint=Source.ROSDEP, origin_packages=["pkg_a"])
-    assert manager.resolve(dep) is None
+    with pytest.raises(UnresolvedDependencies) as exc:
+        manager_for(tmp_path, system(), runner).resolve_all([dep])
+
+    assert [f.dep for f in exc.value.failures] == [dep]
     assert calls == [["rosdep", "resolve", "my_typo_dep", "--rosdistro", "humble"]]
 
 
-def _no_pypi(cmd, **kwargs):  # type: ignore[no-untyped-def]
+def _no_commands(cmd, **kwargs):  # type: ignore[no-untyped-def]
     raise AssertionError(f"unexpected command: {cmd}")
 
 
 def test_python_requirement_provided_by_system_is_not_installed(tmp_path: Path) -> None:
-    manager = ResolutionManager(
-        ros_distro="humble",
-        venv=tmp_path / "venv",
-        system=system({"numpy": "1.24.2"}),
-        runner=_no_pypi,
-    )
+    manager = manager_for(tmp_path, system({"numpy": "1.24.2"}), _no_commands)
 
-    resolved = manager.resolve(Dep("NumPy", ">=1.20", Source.PIP, ["pkg_a"]))
+    resolved = resolve_one(manager, Dep("NumPy", ">=1.20", Source.PIP, ["pkg_a"]))
 
-    assert resolved is not None
     assert resolved.chosen_source == Source.DISTRO
     assert resolved.resolved_version == "1.24.2"
 
@@ -215,46 +211,77 @@ def test_python_requirement_provided_by_system_is_not_installed(tmp_path: Path) 
 def test_python_requirement_conflicting_with_system_fails_with_reason(
     tmp_path: Path,
 ) -> None:
-    uv_error = "Because you require numpy>=2 and numpy==1.24.2, ... unsatisfiable."
-
-    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
-        assert cmd[:3] == ["uv", "pip", "compile"]
-        return completed(cmd, "", returncode=1, stderr=uv_error)
-
-    manager = ResolutionManager(
-        ros_distro="humble",
-        venv=tmp_path / "venv",
-        system=system({"numpy": "1.24.2"}),
-        runner=runner,
-    )
+    manager = manager_for(tmp_path, system({"numpy": "1.24.2"}), _no_commands)
     dep = Dep("numpy", ">=2", Source.PIP, ["pkg_a"])
 
-    assert manager.resolve(dep) is None
-    reason = manager.failure_reason(dep)
-    assert "the system provides numpy 1.24.2" in reason
-    assert uv_error in reason
+    with pytest.raises(UnresolvedDependencies) as exc:
+        manager.resolve_all([dep])
+
+    assert "the system provides numpy 1.24.2" in str(exc.value)
+    assert "petal add --pip" in str(exc.value)
+
+
+def test_pypi_deps_are_pinned_together_against_system_constraints(
+    tmp_path: Path,
+) -> None:
+    constraints = tmp_path / ".petal" / "constraints.txt"
+    view = system({"pygments": "2.18.0"}, constraints_path=constraints)
+    compiles: list[str] = []
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        assert cmd[cmd.index("--constraints") + 1] == str(constraints)
+        compiles.append(kwargs["input"])
+        return uv_compile(cmd, kwargs, {"rich": "15.0.0", "httpx": "0.28.1"})
+
+    rich, httpx = manager_for(tmp_path, view, runner).resolve_all(
+        [Dep("rich", "", Source.PIP), Dep("httpx", ">=0.27", Source.PIP)]
+    )
+
+    assert compiles == ["rich\nhttpx>=0.27\n"]
+    assert (rich.resolved_version, httpx.resolved_version) == ("15.0.0", "0.28.1")
+    assert "pygments==2.18.0" in constraints.read_text(encoding="utf-8").splitlines()
+
+
+def test_pypi_failure_is_attributed_to_the_failing_dep(tmp_path: Path) -> None:
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if "nonexistent" in kwargs["input"]:
+            return completed(cmd, "", 1, stderr="nonexistent was not found")
+        return uv_compile(cmd, kwargs, {"rich": "15.0.0"})
+
+    bad = Dep("nonexistent", "", Source.PIP, ["pkg_a"])
+    with pytest.raises(UnresolvedDependencies) as exc:
+        manager_for(tmp_path, system(), runner).resolve_all(
+            [Dep("rich", "", Source.PIP), bad]
+        )
+
+    assert exc.value.failures == [Unresolved(bad, "nonexistent was not found")]
+
+
+def test_pypi_deps_that_conflict_only_together_raise_conflict(tmp_path: Path) -> None:
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if len(kwargs["input"].splitlines()) > 1:
+            return completed(cmd, "", 1, stderr="a needs b<2 and c needs b>=2")
+        return uv_compile(cmd, kwargs, {"a": "1", "c": "1"})
+
+    with pytest.raises(PlannerConflict, match="a needs b<2 and c needs b>=2"):
+        manager_for(tmp_path, system(), runner).resolve_all(
+            [Dep("a", "", Source.PIP), Dep("c", "", Source.PIP)]
+        )
 
 
 def test_explicit_pip_dep_may_shadow_system_copy(tmp_path: Path) -> None:
     constraints = tmp_path / "constraints.txt"
+    view = system(
+        {"numpy": "1.24.2", "pyyaml": "6.0.1"},
+        allow_shadow=("numpy",),
+        constraints_path=constraints,
+    )
+    runner = lambda cmd, **kwargs: uv_compile(cmd, kwargs, {"numpy": "2.1.0"})
 
-    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
-        return completed(cmd, "numpy==2.1.0\n")
-
-    manager = ResolutionManager(
-        ros_distro="humble",
-        venv=tmp_path / "venv",
-        system=system(
-            {"numpy": "1.24.2", "pyyaml": "6.0.1"},
-            allow_shadow=("numpy",),
-            constraints_path=constraints,
-        ),
-        runner=runner,
+    resolved = resolve_one(
+        manager_for(tmp_path, view, runner), Dep("numpy", ">=2", Source.PIP)
     )
 
-    resolved = manager.resolve(Dep("numpy", ">=2", Source.PIP))
-
-    assert resolved is not None
     assert resolved.chosen_source == Source.PIP
     assert resolved.resolved_version == "2.1.0"
     pins = constraints.read_text(encoding="utf-8").splitlines()
@@ -267,17 +294,32 @@ def test_rosdep_pip_rule_prefers_system_copy(tmp_path: Path) -> None:
         assert cmd[0] == "rosdep"
         return completed(cmd, fixture("rosdep_pip_ml_collections.txt"))
 
-    manager = ResolutionManager(
-        ros_distro="humble",
-        venv=tmp_path / "venv",
-        system=system({"ml-collections": "0.1.1"}),
-        runner=runner,
+    view = system({"ml-collections": "0.1.1"})
+    resolved = resolve_one(
+        manager_for(tmp_path, view, runner),
+        Dep("ml_collections", source_hint=Source.ROSDEP),
     )
 
-    resolved = manager.resolve(Dep("ml_collections", source_hint=Source.ROSDEP))
-
-    assert resolved is not None
     assert resolved.chosen_source == Source.DISTRO
+
+
+def test_pip_requirement_defers_to_python3_deb_planned_by_rosdep(
+    tmp_path: Path,
+) -> None:
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[:3] == ["rosdep", "resolve", "python3-scipy"]:
+            return completed(cmd, "#apt\npython3-scipy\n")
+        raise AssertionError(f"scipy must not be resolved on PyPI: {cmd}")
+
+    deb, scipy = manager_for(tmp_path, system(), runner).resolve_all(
+        [
+            Dep("python3-scipy", source_hint=Source.ROSDEP, origin_packages=["pkg_a"]),
+            Dep("scipy", ">=1.8", Source.PIP, ["pkg_a"]),
+        ]
+    )
+
+    assert (deb.chosen_source, deb.apt_pkg) == (Source.APT, "python3-scipy")
+    assert scipy.chosen_source == Source.DISTRO
 
 
 def test_distro_resolver_checks_version_spec_for_bare_deps() -> None:

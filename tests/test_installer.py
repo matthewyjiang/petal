@@ -5,16 +5,30 @@ from pathlib import Path
 
 import pytest
 
-from petal.installer import InstallerError, execute, write_lock
+from petal.config import lock_stamp
+from petal.installer import InstallerError, write_lock
+from petal.installer import execute as _execute
 from petal.models import Dep, ResolvedDep, Source
 from petal.planner import Plan
-from petal.system import SystemPython, SystemView
+from petal.system import NO_SYSTEM, SystemPython, SystemView
 
 
 def completed(
     cmd: list[str], stdout: str = "", returncode: int = 0
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr="")
+
+
+def execute(*args, **kwargs):  # type: ignore[no-untyped-def]
+    kwargs.setdefault("system", NO_SYSTEM)
+    return _execute(*args, **kwargs)
+
+
+def fake_uv(cmd, **kwargs):  # type: ignore[no-untyped-def]
+    """Empty venv for `uv pip list`, `compiled` for `uv pip compile`."""
+    if cmd[:3] == ["uv", "pip", "list"]:
+        return completed(cmd, "[]")
+    return compiled(cmd, kwargs)
 
 
 def compiled(cmd: list[str], kwargs: dict) -> subprocess.CompletedProcess[str]:
@@ -42,8 +56,7 @@ def pip_dep(name: str = "rich") -> ResolvedDep:
 
 def test_execute_dry_run_prints_commands(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     plan = Plan(apt=[apt_dep()], pip=[pip_dep()])
-    runner = lambda cmd, **kwargs: compiled(cmd, kwargs)
-    assert execute(plan, tmp_path / "venv", dry_run=True, runner=runner) is False
+    assert execute(plan, tmp_path / "venv", dry_run=True, runner=fake_uv) is False
 
     out = capsys.readouterr().out
     assert "sudo apt-get install -y python3-numpy" in out
@@ -71,8 +84,8 @@ def test_execute_installs_missing_apt_and_pip_then_writes_lock(
         execute(
             Plan(apt=[apt_dep()], pip=[pip_dep()]),
             tmp_path / "venv",
-            workspace_root=tmp_path,
-            manifest_path=manifest,
+            lock_path=tmp_path / "petal.lock",
+            stamp=lock_stamp(manifest, [], ""),
             runner=runner,
             install_runner=runner,
             assume_yes=True,
@@ -125,7 +138,7 @@ def test_write_lock_serializes_resolved_deps(tmp_path: Path) -> None:
     manifest.write_text("[deps]\n", encoding="utf-8")
     lock = tmp_path / "petal.lock"
 
-    write_lock(lock, manifest, [apt_dep(), pip_dep()])
+    write_lock(lock, lock_stamp(manifest, [], ""), [apt_dep(), pip_dep()])
 
     text = lock.read_text(encoding="utf-8")
     assert text.count("[[resolved]]") == 2
@@ -139,28 +152,28 @@ def test_frozen_errors_when_lock_missing(tmp_path: Path) -> None:
             Plan(pip=[pip_dep()]),
             tmp_path / "venv",
             frozen=True,
-            workspace_root=tmp_path,
+            lock_path=tmp_path / "petal.lock",
         )
 
 
 def test_frozen_errors_when_plan_differs_from_lock(tmp_path: Path) -> None:
     manifest = tmp_path / "petal.toml"
     manifest.write_text("[deps]\n", encoding="utf-8")
-    write_lock(tmp_path / "petal.lock", manifest, [pip_dep("rich")])
+    write_lock(tmp_path / "petal.lock", lock_stamp(manifest, [], ""), [pip_dep("rich")])
 
     with pytest.raises(InstallerError, match="resolved deps differ"):
         execute(
             Plan(pip=[pip_dep("httpx")]),
             tmp_path / "venv",
             frozen=True,
-            workspace_root=tmp_path,
+            lock_path=tmp_path / "petal.lock",
         )
 
 
 def test_frozen_allows_matching_lock(tmp_path: Path) -> None:
     manifest = tmp_path / "petal.toml"
     manifest.write_text("[deps]\n", encoding="utf-8")
-    write_lock(tmp_path / "petal.lock", manifest, [pip_dep("rich")])
+    write_lock(tmp_path / "petal.lock", lock_stamp(manifest, [], ""), [pip_dep("rich")])
     calls: list[list[str]] = []
 
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
@@ -176,7 +189,7 @@ def test_frozen_allows_matching_lock(tmp_path: Path) -> None:
             Plan(pip=[pip_dep("rich")]),
             tmp_path / "venv",
             frozen=True,
-            workspace_root=tmp_path,
+            lock_path=tmp_path / "petal.lock",
             runner=runner,
             install_runner=runner,
             assume_yes=True,
@@ -197,8 +210,8 @@ def test_execute_no_prompt_skips_install(tmp_path: Path, capsys) -> None:  # typ
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
         if cmd[:2] == ["dpkg-query", "-W"]:
             return completed(cmd, returncode=1)
-        if cmd[:3] == ["uv", "pip", "list"]:
-            return completed(cmd, "[]")
+        if cmd[:3] in (["uv", "pip", "list"], ["uv", "pip", "compile"]):
+            return fake_uv(cmd, **kwargs)
         calls.append(cmd)
         return completed(cmd)
 
@@ -267,7 +280,7 @@ def test_execute_noop_leaves_matching_lock_unchanged(tmp_path: Path, capsys) -> 
     manifest = tmp_path / "petal.toml"
     manifest.write_text("[deps]\n", encoding="utf-8")
     dep = pip_dep()
-    write_lock(tmp_path / "petal.lock", manifest, [dep])
+    write_lock(tmp_path / "petal.lock", lock_stamp(manifest, [], ""), [dep])
     before = (tmp_path / "petal.lock").read_text(encoding="utf-8")
 
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
@@ -279,8 +292,8 @@ def test_execute_noop_leaves_matching_lock_unchanged(tmp_path: Path, capsys) -> 
         execute(
             Plan(pip=[dep]),
             tmp_path / "venv",
-            workspace_root=tmp_path,
-            manifest_path=manifest,
+            lock_path=tmp_path / "petal.lock",
+            stamp=lock_stamp(manifest, [], ""),
             runner=runner,
             install_runner=runner,
         )
@@ -305,8 +318,8 @@ def test_execute_noop_writes_missing_lock(tmp_path: Path, capsys) -> None:  # ty
         execute(
             Plan(pip=[dep]),
             tmp_path / "venv",
-            workspace_root=tmp_path,
-            manifest_path=manifest,
+            lock_path=tmp_path / "petal.lock",
+            stamp=lock_stamp(manifest, [], ""),
             runner=runner,
             install_runner=runner,
         )
@@ -319,7 +332,7 @@ def test_execute_noop_writes_missing_lock(tmp_path: Path, capsys) -> None:  # ty
 
 def test_execute_non_tty_requires_yes(tmp_path: Path) -> None:
     with pytest.raises(InstallerError, match="--yes"):
-        execute(Plan(pip=[pip_dep()]), tmp_path / "venv")
+        execute(Plan(pip=[pip_dep()]), tmp_path / "venv", runner=fake_uv)
 
 
 def test_execute_never_installs_system_provided_packages(
@@ -376,3 +389,54 @@ def test_execute_reports_unresolvable_pip_closure(tmp_path: Path) -> None:
             install_runner=runner,
             assume_yes=True,
         )
+
+
+def test_execute_reresolves_pip_closure_when_apt_changes_the_system(
+    tmp_path: Path,
+) -> None:  # type: ignore[no-untyped-def]
+    snapshots = [SystemPython(), SystemPython({"pygments": "2.18.0"})]
+    system = SystemView(lambda: snapshots.pop(0), constraints_path=None)
+    calls: list[list[str]] = []
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(cmd)
+        if cmd[:2] == ["dpkg-query", "-W"]:
+            return completed(cmd, returncode=1)
+        if cmd[:3] in (["uv", "pip", "list"], ["uv", "pip", "compile"]):
+            return fake_uv(cmd, **kwargs)
+        return completed(cmd)
+
+    assert execute(
+        Plan(apt=[apt_dep()], pip=[pip_dep()]),
+        tmp_path / "venv",
+        runner=runner,
+        install_runner=runner,
+        assume_yes=True,
+        system=system,
+    )
+
+    # Planned before apt: rich + pygments. After apt the deb provides pygments.
+    assert calls[-1] == install_cmd(tmp_path, "rich==13.7.0")
+    assert sum(cmd[:3] == ["uv", "pip", "compile"] for cmd in calls) == 2
+
+
+def test_execute_noop_rewrites_lock_when_stamp_changes(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text("[deps]\n", encoding="utf-8")
+    dep = ResolvedDep(Dep("rclpy"), Source.DISTRO)
+    old = lock_stamp(manifest, [], "sha256:old-system")
+    new = lock_stamp(manifest, [], "sha256:new-system")
+    write_lock(tmp_path / "petal.lock", old, [dep])
+
+    assert execute(
+        Plan(distro=[dep]),
+        tmp_path / "venv",
+        runner=fake_uv,
+        lock_path=tmp_path / "petal.lock",
+        stamp=new,
+    )
+
+    assert 'system_hash = "sha256:new-system"' in (tmp_path / "petal.lock").read_text(
+        encoding="utf-8"
+    )
+    assert "lock: wrote" in capsys.readouterr().out

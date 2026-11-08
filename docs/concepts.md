@@ -47,7 +47,9 @@ ROS packages are built against the Python packages your system provides. A secon
 - Every system distribution is pinned in `.petal/constraints.txt`. PyPI packages are resolved against those pins, and their dependencies are installed with `--no-deps`, minus anything the system provides.
 - If a requirement needs a different version than the system has, `petal sync` fails and shows uv's explanation instead of installing a shadowing copy.
 
-To shadow a system package on purpose, declare it explicitly as a pip dependency, for example `petal add --pip numpy ">=2"`. Such packages are left out of the constraints.
+To shadow a system package on purpose, declare it as a pip dependency under `[deps]`, for example with `petal add --pip numpy ">=2"`, which writes `numpy = { pip = ">=2" }`. Such packages are left out of the constraints. `[overrides]` entries do not allow shadowing.
+
+`petal.lock` records a fingerprint of the system packages. When they change, for example after an `apt upgrade`, the next `petal sync` resolves again instead of reusing the lock.
 
 `petal sync` warns when `.petal/venv` already contains a copy of a system package, for example one installed by an older petal version. Run `petal clean && petal sync` to remove it.
 

@@ -8,10 +8,9 @@ distribution in a constraints file and never installs what the system provides.
 
 from __future__ import annotations
 
+import hashlib
 import json
-import os
 import subprocess
-import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,8 +20,12 @@ from packaging.version import InvalidVersion, Version
 from petal import env
 from petal.identity import pip_name
 
+# Run with `-I` (no cwd, user site or PYTHON* variables) so the result does not
+# depend on where petal runs or what the caller's shell has sourced; the ROS
+# directories arrive as argv and are put first on sys.path, as activation does.
 _INSPECT = """
-import importlib.metadata, json, pkgutil, re
+import importlib.metadata, json, pkgutil, re, sys
+sys.path[:0] = sys.argv[1:]
 dists = {}
 for dist in importlib.metadata.distributions():
     name = dist.metadata["Name"]
@@ -31,6 +34,9 @@ for dist in importlib.metadata.distributions():
 mods = sorted({m.name for m in pkgutil.iter_modules()})
 print(json.dumps({"distributions": dists, "modules": mods}))
 """
+
+# Installed into every venv by `python -m venv`; not shadowing anything ROS uses.
+_VENV_SEED = frozenset({"pip", "setuptools", "wheel"})
 
 
 @dataclass(frozen=True)
@@ -44,27 +50,22 @@ class SystemPython:
 
 
 def inspect_system_python(distro: str) -> SystemPython:
-    """Inspect the ROS distro's interpreter as an activated petal venv sees it.
-
-    `-s` drops user site-packages (venvs ignore them) and PYTHONPATH is exactly
-    the ROS directories that `.petal/activate` adds, so the result does not
-    depend on what the caller's shell happens to have sourced.
-    """
+    """Inspect the ROS distro's interpreter as an activated petal venv sees it."""
     interpreter = env.distro_python(distro)
-    lib = env.ros_root() / distro
+    ros = env.ros_root() / distro
     paths = [
-        *sorted((lib / "lib").glob("python3.*/site-packages")),
-        *sorted((lib / "local" / "lib").glob("python3.*/dist-packages")),
+        *sorted((ros / "lib").glob("python3.*/site-packages")),
+        *sorted((ros / "local" / "lib").glob("python3.*/dist-packages")),
     ]
-    child_env = {**os.environ, "PYTHONPATH": os.pathsep.join(map(str, paths))}
-    proc = subprocess.run(
-        [str(interpreter), "-s", "-c", _INSPECT],
-        check=True,
-        text=True,
-        capture_output=True,
-        env=child_env,
-    )
-    return parse_inspection(proc.stdout)
+    cmd = [str(interpreter), "-I", "-c", _INSPECT, *map(str, paths)]
+    try:
+        proc = subprocess.run(cmd, check=True, text=True, capture_output=True)
+        return parse_inspection(proc.stdout)
+    except (subprocess.CalledProcessError, ValueError, KeyError) as exc:
+        detail = getattr(exc, "stderr", "") or exc
+        raise env.PetalEnvError(
+            f"could not inspect ROS Python packages with {interpreter}: {detail}"
+        ) from exc
 
 
 def parse_inspection(output: str) -> SystemPython:
@@ -83,10 +84,8 @@ def parse_inspection(output: str) -> SystemPython:
 class SystemView:
     """System packages plus the constraints file that keeps pip off them.
 
-    Inspection is lazy and thread-safe: a sync that installs nothing never
-    starts the ROS interpreter. `allow_shadow` names packages the user
-    explicitly asked pip to install (`{ pip = ... }` in petal.toml); those are
-    left unpinned and may shadow the system copy.
+    `allow_shadow` names packages declared explicitly as pip deps in the
+    manifest's `[deps]`; those are left unpinned and may shadow the system copy.
     """
 
     def __init__(
@@ -98,54 +97,55 @@ class SystemView:
     ) -> None:
         self._load = load
         self._constraints_path = constraints_path
-        self._python: SystemPython | None = None
-        self._lock = threading.Lock()
         self.allow_shadow = frozenset(pip_name(name) for name in allow_shadow)
+        self.python = load()
 
-    @property
-    def python(self) -> SystemPython:
-        with self._lock:
-            if self._python is None:
-                self._python = self._load()
-                self._write_constraints(self._python)
-            return self._python
+    def refresh(self) -> bool:
+        """Re-inspect, e.g. after apt installed python3-* packages; True if changed."""
+        before = self.python
+        self.python = self._load()
+        return self.python != before
 
-    def refresh(self) -> None:
-        """Forget the snapshot, e.g. after apt installed python3-* packages."""
-        with self._lock:
-            self._python = None
+    def fingerprint(self) -> str:
+        """Identity of this snapshot, recorded in petal.lock."""
+        payload = json.dumps(
+            [sorted(self.python.distributions.items()), sorted(self.python.modules)]
+        )
+        return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
-    def constraints_file(self) -> Path | None:
-        """Path of the up-to-date constraints file, or None without a ROS view."""
-        _ = self.python
-        return self._constraints_path
+    def constraint_args(self) -> list[str]:
+        """uv arguments that pin every protected system distribution."""
+        if self._constraints_path is None:
+            return []
+        self._constraints_path.parent.mkdir(parents=True, exist_ok=True)
+        lines = [
+            "# Generated by petal: ROS/system Python packages pip must not replace.",
+            *(
+                f"{name}=={version}"
+                for name, version in sorted(self.python.distributions.items())
+                if name not in self.allow_shadow
+            ),
+        ]
+        self._constraints_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return ["--constraints", str(self._constraints_path)]
 
     def version(self, name: str) -> str:
         """System version of a distribution, or "" when the system lacks it."""
         return self.python.distributions.get(pip_name(name), "")
-
-    def provides(self, name: str, version: str) -> bool:
-        return bool(version) and self.version(name) == version
 
     def protects(self, name: str) -> bool:
         """True when pip must leave this system distribution alone."""
         key = pip_name(name)
         return key in self.python.distributions and key not in self.allow_shadow
 
-    def _write_constraints(self, python: SystemPython) -> None:
-        if self._constraints_path is None:
-            return
-        self._constraints_path.parent.mkdir(parents=True, exist_ok=True)
-        lines = [
-            "# Generated by petal: ROS/system Python packages pip must not replace.",
-            *(
-                f"{name}=={version}"
-                for name, version in sorted(python.distributions.items())
-                if name not in self.allow_shadow
-            ),
-        ]
-        self._constraints_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    def shadowed_by(self, installed: dict[str, str]) -> dict[str, str]:
+        """Venv packages (name -> version) that shadow a protected system copy."""
+        return {
+            name: version
+            for name, version in installed.items()
+            if name not in _VENV_SEED and self.protects(name)
+        }
 
 
-# No system packages and no constraints file; for callers without a ROS view.
+# No system packages and no constraints file; for tests and callers without ROS.
 NO_SYSTEM = SystemView(SystemPython, constraints_path=None)

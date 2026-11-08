@@ -12,7 +12,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 only
     import tomli as tomllib
 
-from petal.models import Dep, Lock, Manifest, ResolvedDep, Source
+from petal.models import Dep, Lock, LockStamp, Manifest, ResolvedDep, Source
 
 _SECTION_RE = re.compile(r"^\s*\[[^\]]+\]\s*(?:#.*)?$")
 _KEY_RE = re.compile(r"^\s*(?P<key>[A-Za-z0-9_-]+|\"[^\"]+\")\s*=")
@@ -77,6 +77,12 @@ def remove_manifest_dep(path: Path, name: str) -> bool:
             _write_manifest_lines(path, lines)
             return True
     return False
+
+
+def lock_stamp(manifest_path: Path, deps: list[Dep], system_hash: str) -> LockStamp:
+    """Stamp for a lock resolved from this manifest, these deps and this system."""
+    manifest = manifest_hash(manifest_path) if manifest_path.exists() else ""
+    return LockStamp(manifest, dependency_hash(deps), system_hash)
 
 
 def manifest_hash(path: Path) -> str:
@@ -242,4 +248,5 @@ def load_lock(path: Path) -> Lock:
         manifest_hash=str(data.get("manifest_hash", "")),
         resolved=resolved,
         dependency_hash=str(data.get("dependency_hash", "")),
+        system_hash=str(data.get("system_hash", "")),
     )

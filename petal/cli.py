@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
-from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
 
@@ -15,18 +15,17 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 only
 from petal import env, preflight
 from petal.config import (
     add_manifest_dep,
-    dependency_hash,
     find_workspace_root,
     load_lock_or_none,
     load_manifest,
-    manifest_hash,
+    lock_stamp,
     remove_manifest_dep,
     write_manifest,
 )
 from petal.discover.workspace import discover_workspace
 from petal.identity import pip_name
 from petal.installer import InstallerError, execute, uninstall, write_lock
-from petal.models import Dep, ResolvedDep, Source
+from petal.models import Dep, LockStamp, Source
 from petal.planner import Plan, PlannerConflict, build_plan
 from petal.resolve.manager import ResolutionManager, UnresolvedDependencies
 from petal.status import check_status, print_report
@@ -74,38 +73,32 @@ def _cmd_clean(args: argparse.Namespace) -> int:
     return 0
 
 
-def _system_view(
-    workspace: Path, distro: str, manifest_path: Path, extra_shadow: str = ""
-) -> SystemView:
-    """System packages for `distro`; explicit `{ pip = ... }` deps may shadow them."""
+@dataclass(frozen=True)
+class _Inputs:
+    """Everything a resolution depends on, and the lock stamp that identifies it."""
+
+    deps: list[Dep]
+    system: SystemView
+    stamp: LockStamp
+
+
+def _load_inputs(workspace: Path, manifest_path: Path, distro: str) -> _Inputs:
     manifest = load_manifest(manifest_path) if manifest_path.exists() else None
-    shadow = [
-        d.name
-        for d in (manifest.deps if manifest else [])
-        if d.source_hint == Source.PIP
-    ]
-    if extra_shadow:
-        shadow.append(extra_shadow)
-    return SystemView(
+    manifest_deps = manifest.deps if manifest else []
+    deps = [*manifest_deps, *discover_workspace(workspace, ros_distro=distro).deps]
+    system = SystemView(
         lambda: inspect_system_python(distro),
         constraints_path=workspace / ".petal" / "constraints.txt",
-        allow_shadow=shadow,
+        # Explicit `{ pip = ... }` entries in [deps] may shadow system copies.
+        allow_shadow=[d.name for d in manifest_deps if d.source_hint == Source.PIP],
     )
+    return _Inputs(deps, system, lock_stamp(manifest_path, deps, system.fingerprint()))
 
 
-def _resolve_deps(manager: ResolutionManager, deps: list[Dep]) -> list[ResolvedDep]:
-    """Resolve every dep, raising UnresolvedDependencies if any has no source."""
-    workers = max(1, min(8, len(deps)))
-    if workers == 1:
-        results = [manager.resolve(dep) for dep in deps]
-    else:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(manager.resolve, deps))
-    unresolved = [dep for dep, item in zip(deps, results) if item is None]
-    if unresolved:
-        reasons = {dep.name: manager.failure_reason(dep) for dep in unresolved}
-        raise UnresolvedDependencies(unresolved, reasons)
-    return [item for item in results if item is not None]
+def _workspace_plan(inputs: _Inputs, distro: str, venv: Path) -> Plan:
+    """Resolve the whole workspace; raises before anything is installed."""
+    manager = ResolutionManager(ros_distro=distro, venv=venv, system=inputs.system)
+    return build_plan(manager.resolve_all(inputs.deps))
 
 
 def _cmd_sync(args: argparse.Namespace) -> int:
@@ -122,33 +115,23 @@ def _cmd_sync(args: argparse.Namespace) -> int:
     )
     venv = env.ensure_venv(workspace, distro)
 
-    discovered = discover_workspace(workspace, ros_distro=distro)
-    deps = [*(manifest.deps if manifest else []), *discovered.deps]
+    inputs = _load_inputs(workspace, manifest_path, distro)
     lock_path = workspace / "petal.lock"
     lock = load_lock_or_none(lock_path)
-    system = _system_view(workspace, distro, manifest_path)
-    if (
-        not args.dry_run
-        and lock
-        and manifest_path.exists()
-        and lock.manifest_hash == manifest_hash(manifest_path)
-        and lock.dependency_hash == dependency_hash(deps)
-    ):
+    if not args.dry_run and lock and lock.stamp == inputs.stamp:
         plan = build_plan(lock.resolved)
     else:
-        manager = ResolutionManager(ros_distro=distro, venv=venv, system=system)
-        resolved = _resolve_deps(manager, deps)
-        plan = build_plan(resolved)
+        plan = _workspace_plan(inputs, distro, venv)
     execute(
         plan,
         venv,
-        system=system,
+        system=inputs.system,
         frozen=args.frozen,
         dry_run=args.dry_run,
         assume_yes=args.yes or args.frozen,
         assume_no=args.no,
-        workspace_root=workspace,
-        manifest_path=manifest_path,
+        lock_path=lock_path,
+        stamp=inputs.stamp,
     )
     return 0
 
@@ -172,20 +155,6 @@ def _cmd_add(args: argparse.Namespace) -> int:
     distro = manifest.ros_distro or env.detect_ros_distro()
     venv = env.ensure_venv(workspace, distro)
     source_hint = Source.PIP if args.pip else Source.APT if args.apt else None
-    dep = _dep_from_add_args(args.name, args.spec or "", source_hint)
-    system = _system_view(
-        workspace, distro, manifest_path, dep.name if source_hint == Source.PIP else ""
-    )
-    manager = ResolutionManager(ros_distro=distro, venv=venv, system=system)
-    resolved = manager.resolve(dep)
-    if resolved is None:
-        print(
-            f"petal: could not resolve '{args.name}' from any source; not added",
-            file=sys.stderr,
-        )
-        for line in manager.failure_reason(dep).splitlines():
-            print(f"  {line}", file=sys.stderr)
-        return 1
 
     original = manifest_path.read_bytes()
     add_manifest_dep(
@@ -196,24 +165,25 @@ def _cmd_add(args: argparse.Namespace) -> int:
         apt_pkg=args.spec or "" if args.apt else "",
     )
     try:
-        # Resolve the whole post-change workspace before installing anything so
-        # a failure leaves the venv, petal.toml and petal.lock untouched.
-        lock_plan = _workspace_plan(workspace, manifest_path, distro, manager)
+        # `add` is a sync of the edited manifest: the whole workspace resolves
+        # (and pip deps pin) together before anything is installed, and any
+        # failure restores petal.toml.
+        inputs = _load_inputs(workspace, manifest_path, distro)
         proceeded = execute(
-            build_plan([resolved]),
+            _workspace_plan(inputs, distro, venv),
             venv,
-            system=system,
+            system=inputs.system,
             dry_run=args.dry_run,
             assume_yes=args.yes,
             assume_no=args.no,
+            lock_path=workspace / "petal.lock",
+            stamp=inputs.stamp,
         )
     except BaseException:
         manifest_path.write_bytes(original)
         raise
     if not proceeded:
         manifest_path.write_bytes(original)
-        return 0
-    _write_workspace_lock(workspace, manifest_path, lock_plan)
     return 0
 
 
@@ -245,14 +215,13 @@ def _cmd_remove(args: argparse.Namespace) -> int:
         )
     try:
         # Same ordering as add: validate the post-change workspace first.
-        system = _system_view(workspace, distro, manifest_path)
-        manager = ResolutionManager(ros_distro=distro, venv=venv, system=system)
-        lock_plan = _workspace_plan(workspace, manifest_path, distro, manager)
+        inputs = _load_inputs(workspace, manifest_path, distro)
+        plan = _workspace_plan(inputs, distro, venv)
         uninstall(args.name, venv, dry_run=False)
     except BaseException:
         manifest_path.write_bytes(original)
         raise
-    _write_workspace_lock(workspace, manifest_path, lock_plan)
+    write_lock(workspace / "petal.lock", inputs.stamp, plan.items())
     return 0
 
 
@@ -263,28 +232,6 @@ def _manifest_has_dep_key(manifest_path: Path, name: str) -> bool:
         return False
     key = pip_name(name)
     return any(pip_name(str(dep_name)) == key for dep_name in deps)
-
-
-def _dep_from_add_args(name: str, spec: str, source_hint: Source | None) -> Dep:
-    if source_hint == Source.APT:
-        return Dep(name=spec or name, source_hint=Source.APT)
-    return Dep(name=name, version_spec=spec, source_hint=source_hint)
-
-
-def _workspace_plan(
-    workspace: Path, manifest_path: Path, distro: str, manager: ResolutionManager
-) -> Plan:
-    """Resolve manifest + discovered deps; raises if any dep cannot be resolved."""
-    manifest = load_manifest(manifest_path)
-    discovered = discover_workspace(workspace, ros_distro=distro)
-    deps = [*manifest.deps, *discovered.deps]
-    return build_plan(_resolve_deps(manager, deps))
-
-
-def _write_workspace_lock(workspace: Path, manifest_path: Path, plan: Plan) -> None:
-    write_lock(
-        workspace / "petal.lock", manifest_path, [*plan.distro, *plan.apt, *plan.pip]
-    )
 
 
 def _cmd_status(args: argparse.Namespace) -> int:

@@ -10,7 +10,7 @@ petal init
 
 ## `petal add <name> [spec]`
 
-Add a dependency to `petal.toml` and sync it.
+Add a dependency to `petal.toml` and sync the workspace. Petal resolves the whole workspace, including the new dependency, before it installs anything. If resolution fails or you decline the install, `petal.toml` is left unchanged.
 
 ```bash
 petal add numpy
@@ -23,6 +23,8 @@ Use `--apt` or `--pip` to force a source:
 petal add --apt numpy
 petal add --pip huggingface
 ```
+
+`--pip` also lets a package shadow a copy the ROS/system Python already provides. Without it, petal uses the system copy. See [Pip never shadows system packages](/concepts#pip-never-shadows-system-packages).
 
 ## `petal remove <name>`
 

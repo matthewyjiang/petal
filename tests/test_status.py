@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from petal.config import lock_stamp
 from petal.installer import write_lock
 from petal.models import Dep, ResolvedDep, Source
 from petal.status import check_status, print_report
@@ -24,7 +25,7 @@ def make_workspace(tmp_path: Path) -> Path:
         ResolvedDep(Dep("rich"), Source.PIP, resolved_version="13.7.0"),
         ResolvedDep(Dep("rclpy"), Source.DISTRO),
     ]
-    write_lock(tmp_path / "petal.lock", manifest, resolved)
+    write_lock(tmp_path / "petal.lock", lock_stamp(manifest, [], ""), resolved)
     return tmp_path
 
 
@@ -52,7 +53,7 @@ def test_status_uses_canonical_pip_identity_for_underscore_alias(
     manifest.write_text('[workspace]\nros_distro = "humble"\n', encoding="utf-8")
     write_lock(
         tmp_path / "petal.lock",
-        manifest,
+        lock_stamp(manifest, [], ""),
         [ResolvedDep(Dep("foo_bar"), Source.PIP, resolved_version="1.0")],
     )
 
@@ -72,7 +73,7 @@ def test_status_treats_malformed_pip_json_as_missing(tmp_path: Path) -> None:
     manifest.write_text('[workspace]\nros_distro = "humble"\n', encoding="utf-8")
     write_lock(
         tmp_path / "petal.lock",
-        manifest,
+        lock_stamp(manifest, [], ""),
         [ResolvedDep(Dep("rich"), Source.PIP, resolved_version="13.7.0")],
     )
 
@@ -137,7 +138,7 @@ def test_status_uses_known_import_name_for_distro_dep(tmp_path: Path) -> None:
     manifest.write_text('[workspace]\nros_distro = "humble"\n', encoding="utf-8")
     write_lock(
         tmp_path / "petal.lock",
-        manifest,
+        lock_stamp(manifest, [], ""),
         [ResolvedDep(Dep("pyyaml"), Source.DISTRO)],
     )
 
@@ -179,7 +180,7 @@ def test_status_compares_distro_versions_from_metadata(tmp_path: Path) -> None:
     manifest.write_text('[workspace]\nros_distro = "humble"\n', encoding="utf-8")
     write_lock(
         tmp_path / "petal.lock",
-        manifest,
+        lock_stamp(manifest, [], ""),
         [ResolvedDep(Dep("python-dateutil"), Source.DISTRO, resolved_version="2.8.2")],
     )
 
