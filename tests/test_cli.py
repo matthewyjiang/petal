@@ -53,7 +53,6 @@ def test_init_writes_manifest_and_creates_venv(
     assert cli.main(["init", "--workspace", str(tmp_path)]) == 0
     manifest = (tmp_path / "petal.toml").read_text(encoding="utf-8")
     assert 'ros_distro = "humble"' in manifest
-    assert 'python_version = "3.10"' in manifest
     assert "venv:" in capsys.readouterr().out
 
 
@@ -381,39 +380,20 @@ def test_main_handles_keyboard_interrupt(monkeypatch, capsys) -> None:  # type: 
     assert "petal: cancelled" in capsys.readouterr().err
 
 
-def test_activate_prints_eval_snippet(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
-    (tmp_path / "petal.toml").write_text(
-        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n',
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(env, "detect_ros_distro", lambda: "humble")
-    monkeypatch.setattr(
-        env,
-        "activation_snippet",
-        lambda workspace, distro, shell: (
-            f"export VIRTUAL_ENV={workspace}/.petal/venv\n"
-        ),
-    )
+def test_activate_sources_the_workspace_script(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    script = tmp_path / ".petal" / "activate"
+    script.parent.mkdir()
+    script.write_text("", encoding="utf-8")
+
     assert cli.main(["activate", "--workspace", str(tmp_path)]) == 0
-    out = capsys.readouterr().out
-    assert "VIRTUAL_ENV" in out
-
-
-def test_activate_passes_shell_flag(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
-    (tmp_path / "petal.toml").write_text(
-        '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n',
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(env, "detect_ros_distro", lambda: "humble")
-    captured = {}
-
-    def fake_snippet(workspace, distro, shell):  # type: ignore[no-untyped-def]
-        captured["shell"] = shell
-        return "snippet\n"
-
-    monkeypatch.setattr(env, "activation_snippet", fake_snippet)
+    assert capsys.readouterr().out == f". {script}\n"
     assert cli.main(["activate", "--workspace", str(tmp_path), "--shell", "zsh"]) == 0
-    assert captured["shell"] == "zsh"
+    assert capsys.readouterr().out == f"PETAL_SHELL=zsh . {script}\n"
+
+
+def test_activate_requires_init(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    assert cli.main(["activate", "--workspace", str(tmp_path)]) == 1
+    assert "run `petal init` first" in capsys.readouterr().err
 
 
 def test_install_agent_skill_copies_skill(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]

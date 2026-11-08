@@ -25,13 +25,11 @@ class ResolvedDep:
     chosen_source: Source
     resolved_version: str = ""
     apt_pkg: str = ""
-    transitive: bool = False
 
 
 @dataclass
 class Manifest:
     ros_distro: str
-    python_version: str
     deps: list[Dep]
 
 

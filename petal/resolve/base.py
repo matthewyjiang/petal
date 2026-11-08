@@ -11,19 +11,14 @@ from typing import Protocol
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
-from petal.identity import pip_name, python_apt_package
-from petal.models import Dep, ResolvedDep
-
-
-class Resolver(Protocol):
-    def can_resolve(self, dep: Dep) -> bool: ...
-
-    def resolve(self, dep: Dep) -> ResolvedDep | None: ...
+from petal.models import Dep
 
 
 class Runner(Protocol):
+    """Runs a command to completion, capturing text output; `input` feeds stdin."""
+
     def __call__(
-        self, cmd: list[str], **kwargs: object
+        self, cmd: list[str], *, input: str | None = None
     ) -> subprocess.CompletedProcess[str]: ...
 
 
@@ -32,15 +27,11 @@ class StreamRunner(Protocol):
 
 
 def default_runner(
-    cmd: list[str], **kwargs: object
+    cmd: list[str], *, input: str | None = None
 ) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
-            cmd,
-            check=False,
-            text=True,
-            capture_output=True,
-            **kwargs,
+            cmd, check=False, text=True, capture_output=True, input=input
         )
     except FileNotFoundError:
         # Return a failed result so callers handle it the same as a non-zero exit.
@@ -87,14 +78,6 @@ def default_stream_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             cmd, returncode=127, stdout="", stderr=f"{cmd[0]}: command not found"
         )
-
-
-def canonical(name: str) -> str:
-    return pip_name(name)
-
-
-def python_apt_name(name: str) -> str:
-    return python_apt_package(name)
 
 
 def dep_requirement(dep: Dep) -> str:

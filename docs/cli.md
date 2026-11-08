@@ -65,7 +65,7 @@ Returns exit code `2` when the workspace is out of sync.
 
 ## `petal activate`
 
-Print the ROS + venv activation snippet.
+Print a line that sources `.petal/activate`, which sets up ROS and the petal venv. Both forms below do the same thing. Neither changes your current directory. Use `--shell bash|zsh|sh` to pick which ROS setup script is sourced when auto-detection guesses wrong.
 
 ```bash
 source <(petal activate)

@@ -81,7 +81,7 @@ petal sync --no         # show plan, install nothing
 petal sync --dry-run    # show commands, install nothing
 petal sync --frozen     # install petal.lock as recorded; fail if stale
 petal status            # report drift; exits 2 on drift/missing/change
-petal activate          # print shell snippet for ROS + venv activation
+petal activate          # print a line that sources .petal/activate (ROS + venv)
                          # bash/zsh: source <(petal activate)
                          # POSIX sh: . .petal/activate
 petal clean             # remove .petal/venv
@@ -126,7 +126,6 @@ petal add requests '>=2.31'
 ```toml
 [workspace]
 ros_distro = "humble"
-python_version = "3.10"
 
 [deps]
 numpy = ">=1.24"

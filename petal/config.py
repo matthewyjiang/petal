@@ -36,15 +36,9 @@ def find_workspace_root(start: Path | None = None) -> Path:
     return current
 
 
-def write_manifest(path: Path, *, ros_distro: str, python_version: str) -> None:
+def write_manifest(path: Path, *, ros_distro: str) -> None:
     path.write_text(
-        "[workspace]\n"
-        f'ros_distro = "{ros_distro}"\n'
-        f'python_version = "{python_version}"\n'
-        "\n"
-        "[deps]\n"
-        "\n"
-        "[overrides]\n",
+        f'[workspace]\nros_distro = "{ros_distro}"\n\n[deps]\n\n[overrides]\n',
         encoding="utf-8",
     )
 
@@ -223,7 +217,6 @@ def load_manifest(path: Path) -> Manifest:
                 )
     return Manifest(
         ros_distro=str(workspace.get("ros_distro", "")),
-        python_version=str(workspace.get("python_version", "")),
         deps=deps,
     )
 

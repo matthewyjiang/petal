@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 import shutil
 import sys
 from dataclasses import dataclass
@@ -41,11 +42,9 @@ def _cmd_init(args: argparse.Namespace) -> int:
         Path(args.workspace) if args.workspace else Path.cwd()
     )
     distro = env.detect_ros_distro()
-    interpreter = env.distro_python(distro)
-    py_version = env.python_version(interpreter)
     manifest = workspace / "petal.toml"
     if not manifest.exists():
-        write_manifest(manifest, ros_distro=distro, python_version=py_version)
+        write_manifest(manifest, ros_distro=distro)
     venv = env.ensure_venv(workspace, distro)
     print(f"initialized {workspace}")
     print(f"venv: {venv}")
@@ -57,15 +56,13 @@ def _cmd_activate(args: argparse.Namespace) -> int:
     workspace = find_workspace_root(
         Path(args.workspace) if args.workspace else Path.cwd()
     )
-    manifest_path = workspace / "petal.toml"
-    manifest = load_manifest(manifest_path) if manifest_path.exists() else None
-    distro = (
-        manifest.ros_distro
-        if manifest and manifest.ros_distro
-        else env.detect_ros_distro()
-    )
-    shell = getattr(args, "shell", None) or None
-    print(env.activation_snippet(workspace, distro, shell), end="")
+    script = workspace / ".petal" / "activate"
+    if not script.is_file():
+        raise env.PetalEnvError(f"{script} not found; run `petal init` first")
+    # Print a line that sources the script so `source <(petal activate)` and
+    # `. .petal/activate` behave identically.
+    shell = f"PETAL_SHELL={args.shell} " if args.shell else ""
+    print(f"{shell}. {shlex.quote(str(script))}")
     return 0
 
 
@@ -226,13 +223,7 @@ def _cmd_add(args: argparse.Namespace) -> int:
     )
     manifest_path = workspace / "petal.toml"
     if not manifest_path.exists():
-        distro = env.detect_ros_distro()
-        interpreter = env.distro_python(distro)
-        write_manifest(
-            manifest_path,
-            ros_distro=distro,
-            python_version=env.python_version(interpreter),
-        )
+        write_manifest(manifest_path, ros_distro=env.detect_ros_distro())
 
     manifest = load_manifest(manifest_path)
     distro = manifest.ros_distro or env.detect_ros_distro()
@@ -345,7 +336,7 @@ def _skill_source() -> Path:
     candidates: list[Path] = []
     try:
         dist = metadata.distribution("petal-ros")
-        candidates.append(Path(dist.locate_file("skills/petal-cli")))
+        candidates.append(Path(str(dist.locate_file("skills/petal-cli"))))
     except metadata.PackageNotFoundError:
         pass
     candidates.append(Path(__file__).resolve().parent.parent / "skills" / "petal-cli")
@@ -399,7 +390,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     activate = sub.add_parser(
         "activate",
-        help="print shell snippet to activate petal env (source <(petal activate))",
+        help="print a line that activates ROS + the petal venv (source <(petal activate))",
     )
     activate.add_argument("--workspace")
     activate.add_argument(

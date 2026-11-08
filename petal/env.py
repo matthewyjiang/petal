@@ -117,7 +117,7 @@ def ensure_venv(workspace_root: Path, distro: str) -> Path:
                 "Run `petal clean`, then `petal init`."
             )
         (venv / "COLCON_IGNORE").touch()
-        _write_activate(workspace_root, distro)
+        write_activate(workspace_root, distro)
         return venv
 
     venv.parent.mkdir(parents=True, exist_ok=True)
@@ -126,11 +126,15 @@ def ensure_venv(workspace_root: Path, distro: str) -> Path:
         check=True,
     )
     (venv / "COLCON_IGNORE").touch()
-    _write_activate(workspace_root, distro)
+    write_activate(workspace_root, distro)
     return venv
 
 
-def _write_activate(workspace_root: Path, distro: str) -> Path:
+def write_activate(workspace_root: Path, distro: str) -> Path:
+    """Write `.petal/activate`, the one script that activates ROS + the venv.
+
+    Sourced directly (`. .petal/activate`) or via `source <(petal activate)`.
+    """
     petal_dir = workspace_root / ".petal"
     petal_dir.mkdir(parents=True, exist_ok=True)
     activate = petal_dir / "activate"
@@ -173,55 +177,10 @@ def _write_activate(workspace_root: Path, distro: str) -> Path:
         "  return 1\n"
         "fi\n"
         "\n"
+        "unset PYTHONHOME\n"
         '. "${_petal_ws}/.petal/venv/bin/activate" || return $?\n'
-        'cd "${_petal_ws}" || return $?\n'
         "unset _petal_ws _petal_ros_dir _petal_shell\n",
         encoding="utf-8",
     )
     activate.chmod(0o755)
     return activate
-
-
-def _detect_shell() -> str:
-    """Return ROS 2-supported shell name from $SHELL, defaulting to sh."""
-    shell_path = os.environ.get("SHELL", "")
-    name = Path(shell_path).name
-    if name in ("bash", "zsh", "sh"):
-        return name
-    return "sh"
-
-
-def _ros_setup_for_shell(distro: str, shell: str) -> Path | None:
-    """Return the best ROS setup file for the given shell, or None if none exist."""
-    ros_dir = ros_root() / distro
-    candidates = [f"setup.{shell}"]
-    if shell != "sh":
-        candidates.append("setup.sh")
-    if shell != "bash":
-        candidates.append("setup.bash")
-    for name in candidates:
-        path = ros_dir / name
-        if path.exists():
-            return path
-    return None
-
-
-def activation_snippet(
-    workspace_root: Path, distro: str, shell: str | None = None
-) -> str:
-    """Return a shell snippet to activate the petal venv + ROS env (use: source <(petal activate))."""
-    if shell is None:
-        shell = _detect_shell()
-    venv = venv_path(workspace_root)
-    ros_setup = _ros_setup_for_shell(distro, shell)
-
-    lines = ["unset PYTHONHOME"]
-    if ros_setup is not None:
-        lines.append(f". {shlex.quote(str(ros_setup))}")
-    lines.extend(
-        [
-            f'export VIRTUAL_ENV="{venv}"',
-            'export PATH="$VIRTUAL_ENV/bin:$PATH"',
-        ]
-    )
-    return "\n".join(lines) + "\n"

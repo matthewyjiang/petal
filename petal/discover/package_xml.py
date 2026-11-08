@@ -18,9 +18,8 @@ DEPEND_TAGS = {
 def package_name(package_xml: Path) -> str:
     root = ET.parse(package_xml).getroot()
     node = root.find("name")
-    if node is None or not (node.text or "").strip():
-        return package_xml.parent.name
-    return node.text.strip()
+    name = (node.text or "").strip() if node is not None else ""
+    return name or package_xml.parent.name
 
 
 def condition_context(ros_distro: str) -> dict[str, str]:

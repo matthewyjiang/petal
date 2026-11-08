@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from petal.identity import pip_name
 from petal.models import Dep, ResolvedDep, Source
-from petal.resolve.base import canonical, satisfies
+from petal.resolve.base import satisfies
 from petal.system import SystemView
 
 KNOWN_IMPORTS = {
@@ -34,5 +35,5 @@ class DistroResolver:
 
     @staticmethod
     def _import_name(name: str) -> str:
-        value = canonical(name)
+        value = pip_name(name)
         return KNOWN_IMPORTS.get(value, value.replace("-", "_"))

@@ -6,10 +6,11 @@ from pathlib import Path
 import pytest
 from packaging.requirements import Requirement
 
+from petal.identity import pip_name, python_apt_package
 from petal.models import Dep, ResolvedDep, Source
 from petal.planner import PlannerConflict
 from petal.resolve.apt import AptResolver, _candidate_version
-from petal.resolve.base import canonical, python_apt_name, upstream_version
+from petal.resolve.base import upstream_version
 from petal.resolve.distro import DistroResolver
 from petal.resolve.manager import (
     ResolutionManager,
@@ -47,10 +48,10 @@ def system(
 
 
 def test_canonical_helpers() -> None:
-    assert canonical("ml_collections") == "ml-collections"
-    assert canonical("Foo_Bar") == "foo-bar"
-    assert python_apt_name("NumPy") == "python3-numpy"
-    assert python_apt_name("python3-numpy") == "python3-numpy"
+    assert pip_name("ml_collections") == "ml-collections"
+    assert pip_name("Foo_Bar") == "foo-bar"
+    assert python_apt_package("NumPy") == "python3-numpy"
+    assert python_apt_package("python3-numpy") == "python3-numpy"
 
 
 def test_distro_resolver_short_circuits_rclpy() -> None:
