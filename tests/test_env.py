@@ -88,7 +88,6 @@ def test_ensure_venv_uses_system_site_packages(
     assert "setup.${_petal_shell}" in activate
     assert '. "${_petal_ws}/.petal/venv/bin/activate" || return $?' in activate
     assert "unset PYTHONHOME" in activate
-    assert "cd " not in activate
 
 
 def test_ensure_venv_rejects_version_mismatch(

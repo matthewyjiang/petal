@@ -147,7 +147,7 @@ def write_activate(workspace_root: Path, distro: str) -> Path:
         '  echo "petal: run: . .petal/activate" >&2\n'
         "  exit 2\n"
         "fi\n"
-        'if [ -n "${ZSH_VERSION:-}" ] && case ${ZSH_EVAL_CONTEXT:-} in *:file:*) false;; *) true;; esac; then\n'
+        'if [ -n "${ZSH_VERSION:-}" ] && case ${ZSH_EVAL_CONTEXT:-} in *:file*) false;; *) true;; esac; then\n'
         '  echo "petal: this script must be sourced, not executed" >&2\n'
         '  echo "petal: run: . .petal/activate" >&2\n'
         "  exit 2\n"
