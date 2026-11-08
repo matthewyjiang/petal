@@ -9,7 +9,11 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 only
     import tomli as tomllib
 
 from petal.config import find_workspace_root
-from petal.discover.package_xml import package_name, parse_package_xml
+from petal.discover.package_xml import (
+    condition_context,
+    package_name,
+    parse_package_xml,
+)
 from petal.discover.pyproject import parse_pyproject
 from petal.discover.setup_cfg import parse_setup_cfg, parse_setup_py
 from petal.identity import dep_key, pip_name
@@ -33,7 +37,7 @@ def _has_colcon_ignore(path: Path, stop_at: Path) -> bool:
     return False
 
 
-def _load_overrides(workspace_root: Path) -> dict[str, dict[str, str]]:
+def _load_overrides(workspace_root: Path) -> dict[str, dict[str, object]]:
     manifest = workspace_root / "petal.toml"
     if not manifest.exists():
         return {}
@@ -42,15 +46,18 @@ def _load_overrides(workspace_root: Path) -> dict[str, dict[str, str]]:
 
 
 def _apply_overrides(
-    deps: list[Dep], overrides: dict[str, dict[str, str]]
+    deps: list[Dep], overrides: dict[str, dict[str, object]]
 ) -> list[Dep]:
+    """Remap discovered deps per `[overrides]`: `pip`, `apt`, or `skip = true`."""
     out: list[Dep] = []
     for dep in deps:
         override = overrides.get(dep.name)
+        if override and override.get("skip") is True:
+            continue
         if override and "pip" in override:
             out.append(
                 Dep(
-                    name=pip_name(override["pip"]),
+                    name=pip_name(str(override["pip"])),
                     version_spec=dep.version_spec,
                     source_hint=Source.PIP,
                     origin_packages=list(dep.origin_packages),
@@ -59,7 +66,7 @@ def _apply_overrides(
         elif override and "apt" in override:
             out.append(
                 Dep(
-                    name=override["apt"],
+                    name=str(override["apt"]),
                     version_spec=dep.version_spec,
                     source_hint=Source.APT,
                     origin_packages=list(dep.origin_packages),
@@ -97,7 +104,13 @@ def _merge_deps(deps: list[Dep]) -> list[Dep]:
     return sorted(merged.values(), key=lambda d: d.name)
 
 
-def discover_workspace(start: Path | None = None) -> WorkspaceDiscovery:
+def discover_workspace(
+    start: Path | None = None, *, ros_distro: str = ""
+) -> WorkspaceDiscovery:
+    """Collect deps from every non-ignored package under the workspace's src/.
+
+    `ros_distro` feeds `$ROS_DISTRO` in package.xml `condition` attributes.
+    """
     workspace_root = find_workspace_root(start)
     src = workspace_root / "src"
     if not src.is_dir():
@@ -116,9 +129,10 @@ def discover_workspace(start: Path | None = None) -> WorkspaceDiscovery:
     # package manager. Resolving them externally would at best fail and at worst
     # install an unrelated PyPI project that happens to share the name.
     local_names = {pip_name(name) for _, name in packages}
+    context = condition_context(ros_distro)
 
     for package_dir, origin in packages:
-        deps = parse_package_xml(package_dir / "package.xml")
+        deps = parse_package_xml(package_dir / "package.xml", context)
         if (package_dir / "setup.cfg").exists():
             deps.extend(parse_setup_cfg(package_dir / "setup.cfg", origin))
         if (package_dir / "setup.py").exists():

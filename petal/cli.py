@@ -27,7 +27,7 @@ from petal.discover.workspace import discover_workspace
 from petal.identity import pip_name
 from petal.installer import InstallerError, execute, uninstall, write_lock
 from petal.models import Dep, ResolvedDep, Source
-from petal.planner import PlannerConflict, build_plan
+from petal.planner import Plan, PlannerConflict, build_plan
 from petal.resolve.manager import ResolutionManager, UnresolvedDependencies
 from petal.status import check_status, print_report
 
@@ -103,7 +103,7 @@ def _cmd_sync(args: argparse.Namespace) -> int:
     )
     venv = env.ensure_venv(workspace, distro)
 
-    discovered = discover_workspace(workspace)
+    discovered = discover_workspace(workspace, ros_distro=distro)
     deps = [*(manifest.deps if manifest else []), *discovered.deps]
     lock_path = workspace / "petal.lock"
     lock = load_lock_or_none(lock_path)
@@ -160,23 +160,33 @@ def _cmd_add(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    plan = build_plan([resolved])
-    proceeded = execute(
-        plan,
-        venv,
-        dry_run=args.dry_run,
-        assume_yes=args.yes,
-        assume_no=args.no,
+
+    original = manifest_path.read_bytes()
+    add_manifest_dep(
+        manifest_path,
+        args.name,
+        version_spec=args.spec or "",
+        source_hint=source_hint,
+        apt_pkg=args.spec or "" if args.apt else "",
     )
-    if proceeded:
-        add_manifest_dep(
-            manifest_path,
-            args.name,
-            version_spec=args.spec or "",
-            source_hint=source_hint,
-            apt_pkg=args.spec or "" if args.apt else "",
+    try:
+        # Resolve the whole post-change workspace before installing anything so
+        # a failure leaves the venv, petal.toml and petal.lock untouched.
+        lock_plan = _workspace_plan(workspace, manifest_path, distro, manager)
+        proceeded = execute(
+            build_plan([resolved]),
+            venv,
+            dry_run=args.dry_run,
+            assume_yes=args.yes,
+            assume_no=args.no,
         )
-        _rewrite_lock(workspace, manifest_path, distro, venv)
+    except BaseException:
+        manifest_path.write_bytes(original)
+        raise
+    if not proceeded:
+        manifest_path.write_bytes(original)
+        return 0
+    _write_workspace_lock(workspace, manifest_path, lock_plan)
     return 0
 
 
@@ -197,15 +207,24 @@ def _cmd_remove(args: argparse.Namespace) -> int:
         print(f"{args.name} not present in petal.toml")
         return 0
 
-    uninstall(args.name, venv, dry_run=args.dry_run)
     if args.dry_run:
+        uninstall(args.name, venv, dry_run=True)
         return 0
 
+    original = manifest_path.read_bytes()
     if not remove_manifest_dep(manifest_path, args.name):
         raise InstallerError(
-            f"could not remove {args.name} from petal.toml; lock not rewritten"
+            f"could not remove {args.name} from petal.toml; nothing uninstalled"
         )
-    _rewrite_lock(workspace, manifest_path, distro, venv)
+    try:
+        # Same ordering as add: validate the post-change workspace first.
+        manager = ResolutionManager(ros_distro=distro, venv=venv)
+        lock_plan = _workspace_plan(workspace, manifest_path, distro, manager)
+        uninstall(args.name, venv, dry_run=False)
+    except BaseException:
+        manifest_path.write_bytes(original)
+        raise
+    _write_workspace_lock(workspace, manifest_path, lock_plan)
     return 0
 
 
@@ -224,14 +243,17 @@ def _dep_from_add_args(name: str, spec: str, source_hint: Source | None) -> Dep:
     return Dep(name=name, version_spec=spec, source_hint=source_hint)
 
 
-def _rewrite_lock(
-    workspace: Path, manifest_path: Path, distro: str, venv: Path
-) -> None:
+def _workspace_plan(
+    workspace: Path, manifest_path: Path, distro: str, manager: ResolutionManager
+) -> Plan:
+    """Resolve manifest + discovered deps; raises if any dep cannot be resolved."""
     manifest = load_manifest(manifest_path)
-    discovered = discover_workspace(workspace)
+    discovered = discover_workspace(workspace, ros_distro=distro)
     deps = [*manifest.deps, *discovered.deps]
-    manager = ResolutionManager(ros_distro=distro, venv=venv)
-    plan = build_plan(_resolve_deps(manager, deps))
+    return build_plan(_resolve_deps(manager, deps))
+
+
+def _write_workspace_lock(workspace: Path, manifest_path: Path, plan: Plan) -> None:
     write_lock(
         workspace / "petal.lock", manifest_path, [*plan.distro, *plan.apt, *plan.pip]
     )

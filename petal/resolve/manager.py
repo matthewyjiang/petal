@@ -25,9 +25,10 @@ class UnresolvedDependencies(RuntimeError):
             lines.extend(
                 [
                     "package.xml keys resolve only through rosdep, never PyPI.",
-                    "run `rosdep update`, or map a key explicitly in petal.toml:",
+                    "run `rosdep update`, or map the key in petal.toml:",
                     "  [overrides]",
-                    '  <key> = { pip = "<pypi-name>" }',
+                    '  <key> = { pip = "<pypi-name>" }   # or { apt = "<apt-package>" }',
+                    "  <key> = { skip = true }           # not needed on this system",
                 ]
             )
         super().__init__("\n".join(lines))
@@ -73,6 +74,7 @@ class ResolutionManager:
             # key (typo, unreleased package, stale rosdep cache) would install
             # whatever happens to be published under that name. Rosdep's own
             # `pip:` rules still resolve to PIP via RosdepResolver.
+            # Changing these chains? Bump config._RESOLUTION_POLICY.
             return [self.distro, self.rosdep]
         if hint == Source.APT:
             return [self.apt]

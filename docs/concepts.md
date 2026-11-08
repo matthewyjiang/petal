@@ -17,11 +17,20 @@ Petal resolves dependencies in this order:
 
 Apt and distro packages win by default to avoid shadowing packages that ROS was built against.
 
-Keys from `package.xml` are rosdep keys, not PyPI names, so they only resolve through steps 1 and 2. Rosdep rules that map a key to pip still work. Petal never guesses a PyPI package for an unknown key, because a typo or a stale rosdep cache could otherwise install an unrelated project with the same name. Packages that live in the workspace itself are skipped, since colcon builds them. If a key cannot be resolved, `petal sync` fails and lists it. Run `rosdep update`, or map the key explicitly:
+Keys from `package.xml` are rosdep keys, not PyPI names, so they only resolve through steps 1 and 2. Rosdep rules that map a key to pip still work. Petal never guesses a PyPI package for an unknown key, because a typo or a stale rosdep cache could otherwise install an unrelated project with the same name.
+
+Petal also skips:
+
+- packages that live in the workspace itself, since colcon builds them;
+- dependencies whose `condition` attribute is false for ROS 2 and the workspace's distro, for example `condition="$ROS_VERSION == 1"`.
+
+If a key still cannot be resolved, `petal sync` fails and lists it. Run `rosdep update`, or tell Petal what to do with the key:
 
 ```toml
 [overrides]
 some_key = { pip = "some-pypi-name" }
+other_key = { apt = "libfoo-dev" }
+unneeded_key = { skip = true }
 ```
 
 ## The managed venv
