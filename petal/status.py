@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from petal.config import load_lock, manifest_hash
 from petal.identity import pip_name
-from petal.models import Source
+from petal.models import Dep, Source
 from petal.resolve.base import Runner, default_runner, venv_python
 from petal.resolve.distro import DistroResolver
+from petal.resolve.pip import venv_versions
+from petal.system import SystemView
 
 
 @dataclass
@@ -24,8 +25,12 @@ class StatusReport:
 
 
 def check_status(
-    workspace_root: Path, venv: Path, runner: Runner = default_runner
+    workspace_root: Path,
+    venv: Path,
+    system: SystemView,
+    runner: Runner = default_runner,
 ) -> StatusReport:
+    """Compare petal.lock with what the venv and the ROS/system Python provide."""
     lock_path = workspace_root / "petal.lock"
     manifest_path = workspace_root / "petal.toml"
     report = StatusReport()
@@ -50,16 +55,13 @@ def check_status(
                 report.missing.append(name)
         elif item.chosen_source == Source.PIP:
             if pip_versions is None:
-                pip_versions = _pip_versions(venv, runner)
+                pip_versions = venv_versions(venv, runner)
             actual = pip_versions.get(pip_name(name), "")
             _bucket(report, name, actual, item.resolved_version)
         elif item.chosen_source == Source.DISTRO:
-            # Python distributions have metadata; ROS packages such as rclpy
-            # often do not, so fall back to importing them.
-            actual = _distribution_version(name, venv, runner)
-            if actual:
-                _bucket(report, name, actual, item.resolved_version)
-            elif _python_importable(name, venv, runner):
+            # Same view of the system as resolution, independent of whether
+            # this shell sourced ROS. The locked version is informational.
+            if DistroResolver(system).resolve(Dep(name)):
                 report.in_sync.append(name)
             else:
                 report.missing.append(name)
@@ -102,27 +104,6 @@ def _bucket(report: StatusReport, name: str, actual: str, expected: str) -> None
 
 def _apt_version(pkg: str, runner: Runner) -> str:
     proc = runner(["dpkg-query", "-W", "-f=${Version}", pkg])
-    return proc.stdout.strip() if proc.returncode == 0 else ""
-
-
-def _pip_versions(venv: Path, runner: Runner) -> dict[str, str]:
-    proc = runner(
-        ["uv", "pip", "list", "--python", str(venv_python(venv)), "--format", "json"]
-    )
-    if proc.returncode != 0:
-        proc = runner([str(venv_python(venv)), "-m", "pip", "list", "--format", "json"])
-    if proc.returncode != 0:
-        return {}
-    try:
-        data = json.loads(proc.stdout or "[]")
-    except json.JSONDecodeError:
-        return {}
-    return {pip_name(str(item["name"])): str(item["version"]) for item in data}
-
-
-def _distribution_version(name: str, venv: Path, runner: Runner) -> str:
-    code = f"import importlib.metadata as m; print(m.version({name!r}))"
-    proc = runner([str(venv_python(venv)), "-c", code])
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
 

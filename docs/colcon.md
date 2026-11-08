@@ -32,4 +32,4 @@ colcon deps sync --workspace /path/to/ws
 - `sync` resolves and installs dependencies.
 - `status` reports drift and exits with code `2` when the workspace is out of sync.
 - `--dry-run` shows the planned install without mutating state.
-- `--frozen` enforces `petal.lock`.
+- `--frozen` installs exactly what `petal.lock` records and fails if it is out of date.

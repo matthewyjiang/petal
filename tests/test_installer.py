@@ -36,7 +36,9 @@ def compiled(cmd: list[str], kwargs: dict) -> subprocess.CompletedProcess[str]:
     lines = kwargs["input"].split()
     if any(line.startswith("rich") for line in lines):
         lines.append("pygments==2.18.0")
-    return completed(cmd, "\n".join(lines) + "\n")
+    output = Path(cmd[cmd.index("--output-file") + 1])
+    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return completed(cmd)
 
 
 def install_cmd(tmp_path: Path, *reqs: str) -> list[str]:
@@ -85,7 +87,7 @@ def test_execute_installs_missing_apt_and_pip_then_writes_lock(
             Plan(apt=[apt_dep()], pip=[pip_dep()]),
             tmp_path / "venv",
             lock_path=tmp_path / "petal.lock",
-            stamp=lock_stamp(manifest, [], ""),
+            stamp=lock_stamp(manifest, []),
             runner=runner,
             install_runner=runner,
             assume_yes=True,
@@ -138,70 +140,12 @@ def test_write_lock_serializes_resolved_deps(tmp_path: Path) -> None:
     manifest.write_text("[deps]\n", encoding="utf-8")
     lock = tmp_path / "petal.lock"
 
-    write_lock(lock, lock_stamp(manifest, [], ""), [apt_dep(), pip_dep()])
+    write_lock(lock, lock_stamp(manifest, []), [apt_dep(), pip_dep()])
 
     text = lock.read_text(encoding="utf-8")
     assert text.count("[[resolved]]") == 2
     assert 'source = "apt"' in text
     assert 'source = "pip"' in text
-
-
-def test_frozen_errors_when_lock_missing(tmp_path: Path) -> None:
-    with pytest.raises(InstallerError, match="petal.lock missing"):
-        execute(
-            Plan(pip=[pip_dep()]),
-            tmp_path / "venv",
-            frozen=True,
-            lock_path=tmp_path / "petal.lock",
-        )
-
-
-def test_frozen_errors_when_plan_differs_from_lock(tmp_path: Path) -> None:
-    manifest = tmp_path / "petal.toml"
-    manifest.write_text("[deps]\n", encoding="utf-8")
-    write_lock(tmp_path / "petal.lock", lock_stamp(manifest, [], ""), [pip_dep("rich")])
-
-    with pytest.raises(InstallerError, match="resolved deps differ"):
-        execute(
-            Plan(pip=[pip_dep("httpx")]),
-            tmp_path / "venv",
-            frozen=True,
-            lock_path=tmp_path / "petal.lock",
-        )
-
-
-def test_frozen_allows_matching_lock(tmp_path: Path) -> None:
-    manifest = tmp_path / "petal.toml"
-    manifest.write_text("[deps]\n", encoding="utf-8")
-    write_lock(tmp_path / "petal.lock", lock_stamp(manifest, [], ""), [pip_dep("rich")])
-    calls: list[list[str]] = []
-
-    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
-        calls.append(cmd)
-        if cmd[:3] == ["uv", "pip", "list"]:
-            return completed(cmd, "[]")
-        if cmd[:3] == ["uv", "pip", "compile"]:
-            return compiled(cmd, kwargs)
-        return completed(cmd)
-
-    assert (
-        execute(
-            Plan(pip=[pip_dep("rich")]),
-            tmp_path / "venv",
-            frozen=True,
-            lock_path=tmp_path / "petal.lock",
-            runner=runner,
-            install_runner=runner,
-            assume_yes=True,
-        )
-        is True
-    )
-    assert [cmd[:3] for cmd in calls] == [
-        ["uv", "pip", "list"],
-        ["uv", "pip", "compile"],
-        ["uv", "pip", "install"],
-    ]
-    assert calls[-1] == install_cmd(tmp_path, "rich==13.7.0", "pygments==2.18.0")
 
 
 def test_execute_no_prompt_skips_install(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -280,7 +224,7 @@ def test_execute_noop_leaves_matching_lock_unchanged(tmp_path: Path, capsys) -> 
     manifest = tmp_path / "petal.toml"
     manifest.write_text("[deps]\n", encoding="utf-8")
     dep = pip_dep()
-    write_lock(tmp_path / "petal.lock", lock_stamp(manifest, [], ""), [dep])
+    write_lock(tmp_path / "petal.lock", lock_stamp(manifest, []), [dep])
     before = (tmp_path / "petal.lock").read_text(encoding="utf-8")
 
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
@@ -293,7 +237,7 @@ def test_execute_noop_leaves_matching_lock_unchanged(tmp_path: Path, capsys) -> 
             Plan(pip=[dep]),
             tmp_path / "venv",
             lock_path=tmp_path / "petal.lock",
-            stamp=lock_stamp(manifest, [], ""),
+            stamp=lock_stamp(manifest, []),
             runner=runner,
             install_runner=runner,
         )
@@ -319,7 +263,7 @@ def test_execute_noop_writes_missing_lock(tmp_path: Path, capsys) -> None:  # ty
             Plan(pip=[dep]),
             tmp_path / "venv",
             lock_path=tmp_path / "petal.lock",
-            stamp=lock_stamp(manifest, [], ""),
+            stamp=lock_stamp(manifest, []),
             runner=runner,
             install_runner=runner,
         )
@@ -391,11 +335,18 @@ def test_execute_reports_unresolvable_pip_closure(tmp_path: Path) -> None:
         )
 
 
-def test_execute_reresolves_pip_closure_when_apt_changes_the_system(
-    tmp_path: Path,
-) -> None:  # type: ignore[no-untyped-def]
-    snapshots = [SystemPython(), SystemPython({"pygments": "2.18.0"})]
+def test_execute_replans_when_apt_changes_the_system(tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text("[deps]\n", encoding="utf-8")
+    # The deb being installed provides `yaml`, which was headed for PyPI.
+    snapshots = [SystemPython(), SystemPython({"pyyaml": "6.0.1"})]
     system = SystemView(lambda: snapshots.pop(0), constraints_path=None)
+    pyyaml = ResolvedDep(Dep("pyyaml"), Source.PIP, resolved_version="6.0.2")
+    replanned = Plan(
+        apt=[apt_dep()],
+        pip=[pip_dep()],
+        distro=[ResolvedDep(Dep("pyyaml"), Source.DISTRO, resolved_version="6.0.1")],
+    )
     calls: list[list[str]] = []
 
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
@@ -407,25 +358,28 @@ def test_execute_reresolves_pip_closure_when_apt_changes_the_system(
         return completed(cmd)
 
     assert execute(
-        Plan(apt=[apt_dep()], pip=[pip_dep()]),
+        Plan(apt=[apt_dep()], pip=[pip_dep(), pyyaml]),
         tmp_path / "venv",
         runner=runner,
         install_runner=runner,
         assume_yes=True,
         system=system,
+        lock_path=tmp_path / "petal.lock",
+        stamp=lock_stamp(manifest, []),
+        replan=lambda: replanned,
     )
 
-    # Planned before apt: rich + pygments. After apt the deb provides pygments.
-    assert calls[-1] == install_cmd(tmp_path, "rich==13.7.0")
-    assert sum(cmd[:3] == ["uv", "pip", "compile"] for cmd in calls) == 2
+    assert calls[-1] == install_cmd(tmp_path, "rich==13.7.0", "pygments==2.18.0")
+    lock = (tmp_path / "petal.lock").read_text(encoding="utf-8")
+    assert 'name = "pyyaml"\nsource = "distro"' in lock
 
 
 def test_execute_noop_rewrites_lock_when_stamp_changes(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     manifest = tmp_path / "petal.toml"
     manifest.write_text("[deps]\n", encoding="utf-8")
     dep = ResolvedDep(Dep("rclpy"), Source.DISTRO)
-    old = lock_stamp(manifest, [], "sha256:old-system")
-    new = lock_stamp(manifest, [], "sha256:new-system")
+    old = lock_stamp(manifest, [])
+    new = lock_stamp(manifest, [Dep("rclpy")])
     write_lock(tmp_path / "petal.lock", old, [dep])
 
     assert execute(
@@ -436,7 +390,7 @@ def test_execute_noop_rewrites_lock_when_stamp_changes(tmp_path: Path, capsys) -
         stamp=new,
     )
 
-    assert 'system_hash = "sha256:new-system"' in (tmp_path / "petal.lock").read_text(
-        encoding="utf-8"
-    )
+    assert f'dependency_hash = "{new.dependency_hash}"' in (
+        tmp_path / "petal.lock"
+    ).read_text(encoding="utf-8")
     assert "lock: wrote" in capsys.readouterr().out

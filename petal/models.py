@@ -37,11 +37,14 @@ class Manifest:
 
 @dataclass(frozen=True)
 class LockStamp:
-    """What a lock was resolved from; any change means it must be re-resolved."""
+    """The declared inputs a lock was resolved from; any change re-resolves.
+
+    Deliberately machine-independent so a committed lock stays valid across
+    machines. Whether it still fits the local system is checked separately.
+    """
 
     manifest_hash: str
     dependency_hash: str
-    system_hash: str
 
 
 @dataclass
@@ -49,8 +52,7 @@ class Lock:
     manifest_hash: str
     resolved: list[ResolvedDep]
     dependency_hash: str = ""
-    system_hash: str = ""
 
     @property
     def stamp(self) -> LockStamp:
-        return LockStamp(self.manifest_hash, self.dependency_hash, self.system_hash)
+        return LockStamp(self.manifest_hash, self.dependency_hash)

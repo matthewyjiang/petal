@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from petal.identity import pip_name, python_apt_package
+from petal.identity import dep_key, lock_key, pip_name
 from petal.models import Dep, ResolvedDep, Source
-from petal.planner import PlannerConflict
+from petal.planner import PlannerConflict, check_version_conflicts
 from petal.resolve.apt import AptResolver
 from petal.resolve.base import Runner, default_runner, dep_requirement
 from petal.resolve.distro import DistroResolver
-from petal.resolve.pip import Pin, PipCompileError, compile_requirements
+from petal.resolve.pip import (
+    Pin,
+    PipCompileError,
+    compile_requirements,
+    venv_versions,
+)
 from petal.resolve.rosdep import RosdepResolver
 from petal.system import SystemView
 
@@ -57,8 +62,11 @@ class ResolutionManager:
         ros_distro: str,
         venv: Path,
         system: SystemView,
+        locked: dict[str, str] | None = None,
         runner: Runner = default_runner,
     ) -> None:
+        """`locked` maps PyPI names to versions in the current lock, if any."""
+        self.locked = locked or {}
         self.venv = venv
         self.system = system
         self.runner = runner
@@ -72,18 +80,16 @@ class ResolutionManager:
         Raises UnresolvedDependencies or PlannerConflict before anything is
         installed, so callers can validate a whole workspace up front.
         """
-        # Identical deps (same name, spec and hint) share one lookup and result.
-        unique = list({_dep_id(dep): dep for dep in deps}.values())
         with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
-            selected = dict(zip(map(_dep_id, unique), pool.map(self._select, unique)))
-        outcomes = [selected[_dep_id(dep)] for dep in deps]
+            outcomes = list(pool.map(self._select, deps))
         failures = [item for item in outcomes if isinstance(item, Unresolved)]
         if failures:
             raise UnresolvedDependencies(failures)
         resolved = [item for item in outcomes if isinstance(item, ResolvedDep)]
-        resolved = self._defer_to_planned_apt(resolved)
-        self._pin_pypi(resolved)
-        return resolved
+        # Spec clashes between packages are reported with their origins before
+        # uv would report them without.
+        check_version_conflicts(resolved)
+        return self._pin_pypi(resolved)
 
     # Changing these chains? Bump config._RESOLUTION_POLICY.
     def _select(self, dep: Dep) -> ResolvedDep | Unresolved:
@@ -129,36 +135,20 @@ class ResolutionManager:
             "`petal add --pip <name> <spec>`",
         )
 
-    def _defer_to_planned_apt(self, resolved: list[ResolvedDep]) -> list[ResolvedDep]:
-        """Let apt provide a Python requirement it is about to install anyway.
-
-        Common in ROS: package.xml depends on `python3-scipy` while setup.py asks
-        for `scipy`. Installing both would shadow the deb with a PyPI copy.
-        """
-        apt_pkgs = {
-            item.apt_pkg for item in resolved if item.chosen_source == Source.APT
-        }
-        return [
-            ResolvedDep(item.dep, Source.DISTRO)
-            if item.chosen_source == Source.PIP
-            and python_apt_package(item.dep.name) in apt_pkgs
-            and pip_name(item.dep.name) not in self.system.allow_shadow
-            else item
-            for item in resolved
-        ]
-
-    def _pin_pypi(self, resolved: list[ResolvedDep]) -> None:
+    def _pin_pypi(self, resolved: list[ResolvedDep]) -> list[ResolvedDep]:
         """Resolve all PyPI deps together and record each top-level version."""
         items = [item for item in resolved if item.chosen_source == Source.PIP]
         if not items:
-            return
+            return resolved
+        # Keep what is locked or installed when still compatible.
+        preferences = {**venv_versions(self.venv, self.runner), **self.locked}
         try:
-            pins = self._compile([dep_requirement(item.dep) for item in items])
+            pins = self._compile([dep_requirement(i.dep) for i in items], preferences)
         except PipCompileError as joint:
             failures: list[Unresolved] = []
             for item in items:
                 try:
-                    self._compile([dep_requirement(item.dep)])
+                    self._compile([dep_requirement(item.dep)], preferences)
                 except PipCompileError as exc:
                     failures.append(Unresolved(item.dep, str(exc)))
             if failures:
@@ -167,12 +157,46 @@ class ResolutionManager:
                 f"pip dependencies conflict with each other:\n{joint}"
             ) from joint
         versions = {pin.name: pin.version for pin in pins}
-        for item in items:
-            item.resolved_version = versions.get(pip_name(item.dep.name), "")
+        return [
+            replace(item, resolved_version=versions.get(pip_name(item.dep.name), ""))
+            if item.chosen_source == Source.PIP
+            else item
+            for item in resolved
+        ]
 
-    def _compile(self, requirements: list[str]) -> list[Pin]:
-        return compile_requirements(requirements, self.venv, self.system, self.runner)
+    def _compile(
+        self, requirements: list[str], preferences: dict[str, str]
+    ) -> list[Pin]:
+        return compile_requirements(
+            requirements, self.venv, self.system, self.runner, preferences
+        )
 
 
-def _dep_id(dep: Dep) -> tuple[str, str, Source | None]:
-    return (dep.name, dep.version_spec, dep.source_hint)
+def lock_mismatch(
+    locked: list[ResolvedDep], deps: list[Dep], system: SystemView
+) -> str:
+    """Why a lock no longer fits this system, or "" when it still does.
+
+    Checks the facts the lock relied on instead of comparing whole-system
+    snapshots, so a committed lock stays valid on any machine that provides
+    what it needs. Only declared deps are checked; locked PyPI pins are still
+    resolved against the system constraints when installed.
+    """
+    entries = {lock_key(item): item for item in locked}
+    distro = DistroResolver(system)
+    for dep in deps:
+        entry = entries.get(dep_key(dep))
+        if entry is None:
+            continue
+        if entry.chosen_source == Source.DISTRO and not distro.resolve(dep):
+            version = system.version(dep.name)
+            found = f"has {version}" if version else "does not provide it"
+            return (
+                f"{dep.name}{dep.version_spec} is locked to the system, which {found}"
+            )
+        if entry.chosen_source == Source.PIP and system.protects(dep.name):
+            return (
+                f"{dep.name} is locked to PyPI, but the system now provides "
+                f"{system.version(dep.name)}"
+            )
+    return ""

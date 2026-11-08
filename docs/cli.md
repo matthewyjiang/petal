@@ -51,7 +51,7 @@ Common flags:
 | `--yes` | Accept install prompts. |
 | `--no` | Decline install prompts. |
 | `--dry-run` | Show the plan without installing. |
-| `--frozen` | Require the existing lockfile to match. |
+| `--frozen` | Install exactly what `petal.lock` records; fail if it is out of date or does not fit this system. Never rewrites the lock. |
 
 ## `petal status`
 

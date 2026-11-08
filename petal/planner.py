@@ -35,7 +35,7 @@ class _Bounds:
 
 
 def build_plan(resolved: list[ResolvedDep]) -> Plan:
-    _check_version_conflicts(resolved)
+    check_version_conflicts(resolved)
     plan = Plan()
 
     for dep in resolved:
@@ -53,7 +53,8 @@ def build_plan(resolved: list[ResolvedDep]) -> Plan:
     return plan
 
 
-def _check_version_conflicts(resolved: list[ResolvedDep]) -> None:
+def check_version_conflicts(resolved: list[ResolvedDep]) -> None:
+    """Raise PlannerConflict, naming origins, when specs for one name clash."""
     by_name: dict[str, list[ResolvedDep]] = {}
     for item in resolved:
         by_name.setdefault(_key(item), []).append(item)

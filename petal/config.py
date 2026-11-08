@@ -79,10 +79,10 @@ def remove_manifest_dep(path: Path, name: str) -> bool:
     return False
 
 
-def lock_stamp(manifest_path: Path, deps: list[Dep], system_hash: str) -> LockStamp:
-    """Stamp for a lock resolved from this manifest, these deps and this system."""
+def lock_stamp(manifest_path: Path, deps: list[Dep]) -> LockStamp:
+    """Stamp for a lock resolved from this manifest and these (input) deps."""
     manifest = manifest_hash(manifest_path) if manifest_path.exists() else ""
-    return LockStamp(manifest, dependency_hash(deps), system_hash)
+    return LockStamp(manifest, dependency_hash(deps))
 
 
 def manifest_hash(path: Path) -> str:
@@ -93,7 +93,8 @@ def manifest_hash(path: Path) -> str:
 # Bump when resolution rules change so `petal sync` stops reusing locks that
 # were resolved under the old rules. 2: rosdep keys no longer fall back to PyPI.
 # 3: Python requirements the ROS/system Python provides resolve to distro.
-_RESOLUTION_POLICY = "3"
+# 4: the lock's dependency_hash covers the input deps, not the resolved ones.
+_RESOLUTION_POLICY = "4"
 
 
 def dependency_hash(deps: list[Dep]) -> str:
@@ -248,5 +249,4 @@ def load_lock(path: Path) -> Lock:
         manifest_hash=str(data.get("manifest_hash", "")),
         resolved=resolved,
         dependency_hash=str(data.get("dependency_hash", "")),
-        system_hash=str(data.get("system_hash", "")),
     )

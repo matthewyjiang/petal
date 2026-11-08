@@ -25,9 +25,13 @@ from petal.config import (
 from petal.discover.workspace import discover_workspace
 from petal.identity import pip_name
 from petal.installer import InstallerError, execute, uninstall, write_lock
-from petal.models import Dep, LockStamp, Source
+from petal.models import Dep, Lock, LockStamp, Source
 from petal.planner import Plan, PlannerConflict, build_plan
-from petal.resolve.manager import ResolutionManager, UnresolvedDependencies
+from petal.resolve.manager import (
+    ResolutionManager,
+    UnresolvedDependencies,
+    lock_mismatch,
+)
 from petal.status import check_status, print_report
 from petal.system import SystemView, inspect_system_python
 
@@ -92,13 +96,83 @@ def _load_inputs(workspace: Path, manifest_path: Path, distro: str) -> _Inputs:
         # Explicit `{ pip = ... }` entries in [deps] may shadow system copies.
         allow_shadow=[d.name for d in manifest_deps if d.source_hint == Source.PIP],
     )
-    return _Inputs(deps, system, lock_stamp(manifest_path, deps, system.fingerprint()))
+    return _Inputs(deps, system, lock_stamp(manifest_path, deps))
 
 
-def _workspace_plan(inputs: _Inputs, distro: str, venv: Path) -> Plan:
+def _workspace_plan(
+    inputs: _Inputs, distro: str, venv: Path, lock: Lock | None
+) -> Plan:
     """Resolve the whole workspace; raises before anything is installed."""
-    manager = ResolutionManager(ros_distro=distro, venv=venv, system=inputs.system)
+    locked = {
+        pip_name(item.dep.name): item.resolved_version
+        for item in (lock.resolved if lock else [])
+        if item.chosen_source == Source.PIP
+    }
+    manager = ResolutionManager(
+        ros_distro=distro, venv=venv, system=inputs.system, locked=locked
+    )
     return build_plan(manager.resolve_all(inputs.deps))
+
+
+def _sync(
+    workspace: Path,
+    distro: str,
+    venv: Path,
+    *,
+    reuse_lock: bool,
+    frozen: bool = False,
+    dry_run: bool = False,
+    assume_yes: bool = False,
+    assume_no: bool = False,
+) -> bool:
+    """Bring the venv and petal.lock in line with petal.toml and the workspace.
+
+    `frozen` installs exactly what petal.lock records and never rewrites it.
+    Otherwise the lock is reused only while its inputs are unchanged and it
+    still fits this system; anything else resolves the workspace again.
+    """
+    manifest_path = workspace / "petal.toml"
+    lock_path = workspace / "petal.lock"
+    inputs = _load_inputs(workspace, manifest_path, distro)
+    lock = load_lock_or_none(lock_path)
+    mismatch = lock_mismatch(lock.resolved, inputs.deps, inputs.system) if lock else ""
+
+    def replan() -> Plan:
+        return _workspace_plan(inputs, distro, venv, lock)
+
+    if frozen:
+        if lock is None:
+            raise InstallerError("petal.lock missing; run `petal sync` first")
+        if lock.stamp != inputs.stamp:
+            raise InstallerError(
+                "petal.lock is out of date with petal.toml or the workspace; "
+                "run `petal sync`"
+            )
+        if mismatch:
+            raise InstallerError(f"petal.lock does not fit this system: {mismatch}")
+        return execute(
+            build_plan(lock.resolved),
+            venv,
+            system=inputs.system,
+            dry_run=dry_run,
+            assume_yes=True,
+        )
+
+    if reuse_lock and lock and lock.stamp == inputs.stamp and not mismatch:
+        plan = build_plan(lock.resolved)
+    else:
+        plan = replan()
+    return execute(
+        plan,
+        venv,
+        system=inputs.system,
+        dry_run=dry_run,
+        assume_yes=assume_yes,
+        assume_no=assume_no,
+        lock_path=lock_path,
+        stamp=inputs.stamp,
+        replan=replan,
+    )
 
 
 def _cmd_sync(args: argparse.Namespace) -> int:
@@ -114,24 +188,15 @@ def _cmd_sync(args: argparse.Namespace) -> int:
         else env.detect_ros_distro()
     )
     venv = env.ensure_venv(workspace, distro)
-
-    inputs = _load_inputs(workspace, manifest_path, distro)
-    lock_path = workspace / "petal.lock"
-    lock = load_lock_or_none(lock_path)
-    if not args.dry_run and lock and lock.stamp == inputs.stamp:
-        plan = build_plan(lock.resolved)
-    else:
-        plan = _workspace_plan(inputs, distro, venv)
-    execute(
-        plan,
+    _sync(
+        workspace,
+        distro,
         venv,
-        system=inputs.system,
+        reuse_lock=not args.dry_run,
         frozen=args.frozen,
         dry_run=args.dry_run,
-        assume_yes=args.yes or args.frozen,
+        assume_yes=args.yes,
         assume_no=args.no,
-        lock_path=lock_path,
-        stamp=inputs.stamp,
     )
     return 0
 
@@ -165,19 +230,15 @@ def _cmd_add(args: argparse.Namespace) -> int:
         apt_pkg=args.spec or "" if args.apt else "",
     )
     try:
-        # `add` is a sync of the edited manifest: the whole workspace resolves
-        # (and pip deps pin) together before anything is installed, and any
-        # failure restores petal.toml.
-        inputs = _load_inputs(workspace, manifest_path, distro)
-        proceeded = execute(
-            _workspace_plan(inputs, distro, venv),
+        # `add` is a sync of the edited manifest; any failure restores it.
+        proceeded = _sync(
+            workspace,
+            distro,
             venv,
-            system=inputs.system,
+            reuse_lock=False,
             dry_run=args.dry_run,
             assume_yes=args.yes,
             assume_no=args.no,
-            lock_path=workspace / "petal.lock",
-            stamp=inputs.stamp,
         )
     except BaseException:
         manifest_path.write_bytes(original)
@@ -216,7 +277,9 @@ def _cmd_remove(args: argparse.Namespace) -> int:
     try:
         # Same ordering as add: validate the post-change workspace first.
         inputs = _load_inputs(workspace, manifest_path, distro)
-        plan = _workspace_plan(inputs, distro, venv)
+        plan = _workspace_plan(
+            inputs, distro, venv, load_lock_or_none(workspace / "petal.lock")
+        )
         uninstall(args.name, venv, dry_run=False)
     except BaseException:
         manifest_path.write_bytes(original)
@@ -249,7 +312,8 @@ def _cmd_status(args: argparse.Namespace) -> int:
     venv = env.venv_path(workspace)
     if not venv.exists():
         venv = env.ensure_venv(workspace, distro)
-    report = check_status(workspace, venv)
+    system = SystemView(lambda: inspect_system_python(distro), constraints_path=None)
+    report = check_status(workspace, venv, system)
     print_report(report)
     return 0 if report.ok else 2
 

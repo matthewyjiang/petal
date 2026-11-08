@@ -35,16 +35,17 @@ def test_constraints_pin_system_packages_except_allowed_shadows(tmp_path: Path) 
     assert view.version("numpy") == "1.24.2"
 
 
-def test_refresh_reports_changes_and_fingerprint_follows() -> None:
+def test_refresh_rewrites_constraints_only_when_the_system_changed(
+    tmp_path: Path,
+) -> None:
+    constraints = tmp_path / "constraints.txt"
     snapshots = [SystemPython({"numpy": "1.24.2"}), SystemPython({"numpy": "1.24.2"})]
     snapshots.append(SystemPython({"numpy": "1.24.2", "scipy": "1.8.0"}))
-    view = SystemView(lambda: snapshots.pop(0), constraints_path=None)
-    before = view.fingerprint()
+    view = SystemView(lambda: snapshots.pop(0), constraints_path=constraints)
 
     assert view.refresh() is False
-    assert view.fingerprint() == before
     assert view.refresh() is True
-    assert view.fingerprint() != before
+    assert "scipy==1.8.0" in constraints.read_text(encoding="utf-8").splitlines()
 
 
 def test_shadowed_by_ignores_venv_seed_packages() -> None:

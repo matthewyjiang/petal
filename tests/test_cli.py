@@ -12,7 +12,7 @@ from petal.installer import InstallerError, write_lock
 from petal.models import Dep, ResolvedDep, Source
 from petal.planner import Plan
 from petal.resolve.manager import Unresolved, UnresolvedDependencies
-from petal.system import SystemPython, SystemView
+from petal.system import SystemPython
 
 
 def _ok_preflight():
@@ -23,9 +23,6 @@ def _ok_preflight():
 def _no_ros_python(monkeypatch):  # type: ignore[no-untyped-def]
     """The CLI inspects the ROS interpreter; tests run without one."""
     monkeypatch.setattr(cli, "inspect_system_python", lambda distro: SystemPython())
-
-
-EMPTY_SYSTEM_HASH = SystemView(SystemPython, constraints_path=None).fingerprint()
 
 
 class FakeManagerBase:
@@ -110,7 +107,7 @@ def test_sync_uses_current_lock_without_resolving(monkeypatch, tmp_path: Path) -
     venv = tmp_path / ".petal" / "venv"
     write_lock(
         tmp_path / "petal.lock",
-        lock_stamp(manifest, [Dep("rich", ">=13")], EMPTY_SYSTEM_HASH),
+        lock_stamp(manifest, [Dep("rich", ">=13")]),
         [ResolvedDep(Dep("rich", ">=13"), Source.PIP, resolved_version="13.7.0")],
     )
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
@@ -180,7 +177,7 @@ def test_sync_reresolves_when_discovered_deps_change(
     venv = tmp_path / ".petal" / "venv"
     write_lock(
         tmp_path / "petal.lock",
-        lock_stamp(manifest, [Dep("rich", ">=13")], EMPTY_SYSTEM_HASH),
+        lock_stamp(manifest, [Dep("rich", ">=13")]),
         [ResolvedDep(Dep("rich", ">=13"), Source.PIP, resolved_version="13.7.0")],
     )
     monkeypatch.setattr(env, "ensure_venv", lambda workspace, distro: venv)
@@ -208,7 +205,7 @@ def test_sync_reresolves_when_discovered_deps_change(
     assert resolved_names == ["rich", "httpx"]
 
 
-def test_sync_reresolves_when_system_packages_change(
+def test_sync_reresolves_when_system_now_provides_a_locked_pip_dep(
     monkeypatch, tmp_path: Path
 ) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
@@ -219,7 +216,7 @@ def test_sync_reresolves_when_system_packages_change(
     )
     write_lock(
         tmp_path / "petal.lock",
-        lock_stamp(manifest, [Dep("rich", ">=13")], EMPTY_SYSTEM_HASH),
+        lock_stamp(manifest, [Dep("rich", ">=13")]),
         [ResolvedDep(Dep("rich", ">=13"), Source.PIP, resolved_version="13.7.0")],
     )
     venv = tmp_path / ".petal" / "venv"
@@ -246,6 +243,70 @@ def test_sync_reresolves_when_system_packages_change(
 
     assert cli.main(["sync", "--workspace", str(tmp_path)]) == 0
     assert resolved_names == ["rich"]
+
+
+def _frozen_workspace(monkeypatch, tmp_path: Path, manifest_deps: str, lock_deps):  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(preflight, "check", _ok_preflight)
+    manifest = tmp_path / "petal.toml"
+    manifest.write_text(
+        f'[workspace]\nros_distro = "humble"\n\n[deps]\n{manifest_deps}',
+        encoding="utf-8",
+    )
+    write_lock(
+        tmp_path / "petal.lock",
+        lock_stamp(manifest, [Dep("rich", ">=13")]),
+        [ResolvedDep(Dep("rich"), Source.PIP, resolved_version="13.7.0")],
+    )
+    monkeypatch.setattr(
+        env, "ensure_venv", lambda workspace, distro: tmp_path / ".petal" / "venv"
+    )
+    monkeypatch.setattr(
+        cli, "discover_workspace", lambda workspace, **kwargs: SimpleNamespace(deps=[])
+    )
+
+    class FakeManager(FakeManagerBase):
+        def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("--frozen must never resolve")
+
+    monkeypatch.setattr(cli, "ResolutionManager", FakeManager)
+
+
+def test_frozen_installs_the_lock_without_rewriting_it(
+    monkeypatch, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    _frozen_workspace(monkeypatch, tmp_path, 'rich = ">=13"\n', None)
+    executed = {}
+
+    def fake_execute(plan, got_venv, **kwargs):  # type: ignore[no-untyped-def]
+        executed.update(kwargs, plan=plan)
+        return True
+
+    monkeypatch.setattr(cli, "execute", fake_execute)
+
+    assert cli.main(["sync", "--frozen", "--workspace", str(tmp_path)]) == 0
+    assert executed["plan"].pip[0].resolved_version == "13.7.0"
+    assert "lock_path" not in executed and executed["assume_yes"] is True
+
+
+def test_frozen_fails_when_inputs_changed(monkeypatch, tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    _frozen_workspace(monkeypatch, tmp_path, 'rich = ">=14"\n', None)
+
+    assert cli.main(["sync", "--frozen", "--workspace", str(tmp_path)]) == 1
+    assert "out of date with petal.toml" in capsys.readouterr().err
+
+
+def test_frozen_fails_when_lock_does_not_fit_the_system(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:  # type: ignore[no-untyped-def]
+    _frozen_workspace(monkeypatch, tmp_path, 'rich = ">=13"\n', None)
+    monkeypatch.setattr(
+        cli, "inspect_system_python", lambda distro: SystemPython({"rich": "13.9.4"})
+    )
+
+    assert cli.main(["sync", "--frozen", "--workspace", str(tmp_path)]) == 1
+    err = capsys.readouterr().err
+    assert "does not fit this system" in err
+    assert "the system now provides 13.9.4" in err
 
 
 def test_sync_yes_and_no_flags_pass_prompt_overrides(
@@ -404,7 +465,7 @@ def test_status_exit_code_2_on_drift(monkeypatch, tmp_path: Path) -> None:  # ty
     )
     (tmp_path / ".petal" / "venv").mkdir(parents=True)
     monkeypatch.setattr(
-        cli, "check_status", lambda workspace, venv: SimpleNamespace(ok=False)
+        cli, "check_status", lambda workspace, venv, system: SimpleNamespace(ok=False)
     )
     printed = {}
     monkeypatch.setattr(
@@ -415,7 +476,7 @@ def test_status_exit_code_2_on_drift(monkeypatch, tmp_path: Path) -> None:  # ty
     assert printed["called"] is True
 
 
-def test_add_updates_manifest_and_syncs_single_dep(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_add_updates_manifest_and_syncs_workspace(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr(preflight, "check", _ok_preflight)
     (tmp_path / "petal.toml").write_text(
         '[workspace]\nros_distro = "humble"\npython_version = "3.10"\n\n[deps]\n',
@@ -677,7 +738,7 @@ def test_remove_updates_manifest_uninstalls_and_rewrites_lock(
     def fake_uninstall(name, got_venv, **kwargs):  # type: ignore[no-untyped-def]
         calls["uninstall"] = (name, got_venv, kwargs["dry_run"])
 
-    def fake_plan(inputs, distro, venv):  # type: ignore[no-untyped-def]
+    def fake_plan(inputs, distro, venv, lock):  # type: ignore[no-untyped-def]
         assert [dep.name for dep in inputs.deps] == []
         calls["plan"] = distro
         return Plan()

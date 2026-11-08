@@ -11,7 +11,12 @@ from petal.planner import PlannerConflict
 from petal.resolve.apt import AptResolver, _candidate_version
 from petal.resolve.base import canonical, python_apt_name
 from petal.resolve.distro import DistroResolver
-from petal.resolve.manager import ResolutionManager, Unresolved, UnresolvedDependencies
+from petal.resolve.manager import (
+    ResolutionManager,
+    Unresolved,
+    UnresolvedDependencies,
+    lock_mismatch,
+)
 from petal.resolve.pip import parse_pins
 from petal.resolve.rosdep import RosdepResolver, parse_rosdep_resolve
 from petal.system import SystemPython, SystemView
@@ -127,15 +132,31 @@ def test_parse_pins_reads_compile_output() -> None:
 
 
 def manager_for(tmp_path: Path, view: SystemView, runner) -> ResolutionManager:  # type: ignore[no-untyped-def]
+    """Manager over an empty venv; other commands go to `runner`."""
+
+    def route(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[:3] == ["uv", "pip", "list"]:
+            return uv_list(cmd)
+        return runner(cmd, **kwargs)
+
     return ResolutionManager(
-        ros_distro="humble", venv=tmp_path / "venv", system=view, runner=runner
+        ros_distro="humble", venv=tmp_path / "venv", system=view, runner=route
     )
 
 
 def uv_compile(cmd, kwargs, versions: dict[str, str]):  # type: ignore[no-untyped-def]
     """Fake `uv pip compile`: pins each stdin requirement to `versions`."""
     names = [Requirement(line).name for line in kwargs["input"].splitlines()]
-    return completed(cmd, "".join(f"{n}=={versions[n]}\n" for n in names))
+    write_output(cmd, "".join(f"{n}=={versions[n]}\n" for n in names))
+    return completed(cmd, "")
+
+
+def write_output(cmd: list[str], text: str) -> None:
+    Path(cmd[cmd.index("--output-file") + 1]).write_text(text, encoding="utf-8")
+
+
+def uv_list(cmd, installed: str = "[]"):  # type: ignore[no-untyped-def]
+    return completed(cmd, installed)
 
 
 def resolve_one(manager: ResolutionManager, dep: Dep) -> ResolvedDep:
@@ -143,7 +164,7 @@ def resolve_one(manager: ResolutionManager, dep: Dep) -> ResolvedDep:
     return resolved
 
 
-def test_resolution_manager_order_and_cache(tmp_path: Path) -> None:
+def test_resolution_manager_source_order(tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
     def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
@@ -155,7 +176,8 @@ def test_resolution_manager_order_and_cache(tmp_path: Path) -> None:
         if cmd == ["apt-cache", "policy", "python3-ml-collections"]:
             return completed(cmd, fixture("apt_policy_missing.txt"))
         if cmd[:3] == ["uv", "pip", "compile"]:
-            return completed(cmd, fixture("uv_compile_ml_collections.txt"))
+            write_output(cmd, fixture("uv_compile_ml_collections.txt"))
+            return completed(cmd, "")
         return completed(cmd, "", returncode=1)
 
     manager = manager_for(tmp_path, system(modules={"rclpy"}), runner)
@@ -173,8 +195,7 @@ def test_resolution_manager_order_and_cache(tmp_path: Path) -> None:
     assert numpy.chosen_source == Source.APT
     assert ml_resolved.chosen_source == Source.PIP
     assert ml_resolved.resolved_version == "0.1.1"
-    assert again is ml_resolved
-    assert calls.count(["apt-cache", "policy", "python3-ml-collections"]) == 1
+    assert again == ml_resolved
 
 
 def test_unknown_rosdep_key_is_never_looked_up_on_pypi(tmp_path: Path) -> None:
@@ -303,23 +324,56 @@ def test_rosdep_pip_rule_prefers_system_copy(tmp_path: Path) -> None:
     assert resolved.chosen_source == Source.DISTRO
 
 
-def test_pip_requirement_defers_to_python3_deb_planned_by_rosdep(
+def test_pypi_resolution_prefers_locked_and_installed_versions(tmp_path: Path) -> None:
+    seen: dict[str, str] = {}
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[:3] == ["uv", "pip", "list"]:
+            return uv_list(cmd, '[{"name": "mdurl", "version": "0.1.0"}]')
+        output = Path(cmd[cmd.index("--output-file") + 1])
+        seen["preferences"] = output.read_text(encoding="utf-8")
+        return uv_compile(cmd, kwargs, {"rich": "13.7.0"})
+
+    manager = ResolutionManager(
+        ros_distro="humble",
+        venv=tmp_path / "venv",
+        system=system(),
+        locked={"rich": "13.7.0"},
+        runner=runner,
+    )
+    resolve_one(manager, Dep("rich", "", Source.PIP))
+
+    assert seen["preferences"] == "mdurl==0.1.0\nrich==13.7.0\n"
+
+
+def test_spec_conflicts_are_reported_with_origins_before_pinning(
     tmp_path: Path,
 ) -> None:
-    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
-        if cmd[:3] == ["rosdep", "resolve", "python3-scipy"]:
-            return completed(cmd, "#apt\npython3-scipy\n")
-        raise AssertionError(f"scipy must not be resolved on PyPI: {cmd}")
+    deps = [
+        Dep("rich", "<13", Source.PIP, ["pkg_a"]),
+        Dep("rich", ">=13", Source.PIP, ["pkg_b"]),
+    ]
 
-    deb, scipy = manager_for(tmp_path, system(), runner).resolve_all(
-        [
-            Dep("python3-scipy", source_hint=Source.ROSDEP, origin_packages=["pkg_a"]),
-            Dep("scipy", ">=1.8", Source.PIP, ["pkg_a"]),
-        ]
+    with pytest.raises(PlannerConflict, match="pkg_a needs rich<13; pkg_b needs"):
+        manager_for(tmp_path, system(), _no_commands).resolve_all(deps)
+
+
+def test_lock_mismatch_checks_what_the_lock_relied_on() -> None:
+    locked = [
+        ResolvedDep(Dep("numpy"), Source.DISTRO, resolved_version="1.24.2"),
+        ResolvedDep(Dep("rich"), Source.PIP, resolved_version="13.7.0"),
+    ]
+    deps = [Dep("numpy", ">=1.20", Source.PIP), Dep("rich", "", Source.PIP)]
+
+    # A newer system numpy that still satisfies the spec keeps the lock valid.
+    assert lock_mismatch(locked, deps, system({"numpy": "1.26.4"})) == ""
+    assert "which has 1.19.5" in lock_mismatch(
+        locked, deps, system({"numpy": "1.19.5"})
     )
-
-    assert (deb.chosen_source, deb.apt_pkg) == (Source.APT, "python3-scipy")
-    assert scipy.chosen_source == Source.DISTRO
+    assert "does not provide it" in lock_mismatch(locked, deps, system())
+    assert "the system now provides 13.9.4" in lock_mismatch(
+        locked, deps, system({"numpy": "1.24.2", "rich": "13.9.4"})
+    )
 
 
 def test_distro_resolver_checks_version_spec_for_bare_deps() -> None:

@@ -49,7 +49,7 @@ ROS packages are built against the Python packages your system provides. A secon
 
 To shadow a system package on purpose, declare it as a pip dependency under `[deps]`, for example with `petal add --pip numpy ">=2"`, which writes `numpy = { pip = ">=2" }`. Such packages are left out of the constraints. `[overrides]` entries do not allow shadowing.
 
-`petal.lock` records a fingerprint of the system packages. When they change, for example after an `apt upgrade`, the next `petal sync` resolves again instead of reusing the lock.
+When the system changes so that the lock no longer fits, for example because a dependency locked to the system no longer satisfies its version spec, or because a package locked to PyPI is now provided by the system, the next `petal sync` resolves again. System updates that keep the lock valid, such as a compatible `apt upgrade`, do not touch it.
 
 `petal sync` warns when `.petal/venv` already contains a copy of a system package, for example one installed by an older petal version. Run `petal clean && petal sync` to remove it.
 
@@ -63,7 +63,11 @@ numpy = ">=1.24"
 ultralytics = "*"
 ```
 
-After resolution and installation, Petal writes `petal.lock` with the resolved source for each dependency. Use `petal sync --frozen` to enforce the existing lockfile.
+After resolution and installation, Petal writes `petal.lock` with the resolved source for each dependency. The lock is safe to commit: it records what you declared and what was chosen, not the state of one machine. Versions shown for system packages are informational.
+
+When Petal resolves again, it keeps locked and installed PyPI versions where they are still compatible. Adding one dependency does not upgrade the others.
+
+`petal sync --frozen` installs exactly what `petal.lock` records and never rewrites it. It fails without resolving anything if the lock is out of date with `petal.toml` or the workspace, or if the lock does not fit this machine's system packages.
 
 ## Docker and Petal
 
