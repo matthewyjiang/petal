@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import replace
 from importlib import metadata
 from pathlib import Path
@@ -412,7 +413,17 @@ def test_activate_sources_the_workspace_script(tmp_path: Path, capsys) -> None: 
 
 def test_activate_requires_init(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
     assert cli.main(["activate", "--workspace", str(tmp_path)]) == 1
-    assert "run `petal init` first" in capsys.readouterr().err
+
+    # `source <(petal activate)` only sees stdout, so that must fail too.
+    sourced = subprocess.run(
+        ["bash", "-c", 'source <(cat); echo "status=$?"'],
+        input=capsys.readouterr().out,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert sourced.stdout == "status=1\n"
+    assert "run `petal init` first" in sourced.stderr
 
 
 def test_install_agent_skill_copies_skill(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]

@@ -55,7 +55,11 @@ def _cmd_activate(args: argparse.Namespace, host: Host) -> int:
     )
     script = workspace / ".petal" / "activate"
     if not script.is_file():
-        raise env.PetalEnvError(f"{script} not found; run `petal init` first")
+        # `source <(petal activate)` ignores our exit code and stderr, so
+        # print a line that fails where it is sourced.
+        message = f"petal: {script} not found; run `petal init` first"
+        print(f"echo {shlex.quote(message)} >&2; return 1")
+        return 1
     # Print a line that sources the script so `source <(petal activate)` and
     # `. .petal/activate` behave identically.
     shell = f"PETAL_SHELL={args.shell} " if args.shell else ""
