@@ -1,18 +1,13 @@
 from __future__ import annotations
 
-import json
 import sys
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
-from petal.config import (
-    dependency_hash,
-    load_lock,
-    load_lock_or_none,
-    manifest_hash,
-)
+from petal.config import load_lock_or_none
 from petal.identity import lock_key, pip_name
-from petal.models import ResolvedDep, Source
+from petal.models import LockStamp, ResolvedDep, Source
 from petal.planner import Plan
 from petal.resolve.base import (
     Runner,
@@ -22,6 +17,8 @@ from petal.resolve.base import (
     dep_requirement,
     venv_python,
 )
+from petal.resolve.pip import Pin, PipCompileError, compile_requirements, venv_versions
+from petal.system import SystemView
 
 
 class InstallerError(RuntimeError):
@@ -32,54 +29,56 @@ def execute(
     plan: Plan,
     venv: Path,
     *,
-    frozen: bool = False,
+    system: SystemView,
     dry_run: bool = False,
-    workspace_root: Path | None = None,
-    manifest_path: Path | None = None,
+    lock_path: Path | None = None,
+    stamp: LockStamp | None = None,
+    replan: Callable[[Plan], Plan] | None = None,
+    verify: Callable[[], None] | None = None,
     runner: Runner = default_runner,
     install_runner: StreamRunner = default_stream_runner,
     assume_yes: bool = False,
     assume_no: bool = False,
 ) -> bool:
-    if frozen:
-        if not workspace_root:
-            raise InstallerError("frozen install requires workspace root")
-        lock_path = workspace_root / "petal.lock"
-        if not lock_path.exists():
-            raise InstallerError("petal.lock missing; run `petal sync` first")
-        _check_frozen(lock_path, [*plan.distro, *plan.apt, *plan.pip])
+    """Install what `plan` needs, then record it in `lock_path` stamped `stamp`.
 
+    Pip packages are installed as a fully resolved closure with `--no-deps`,
+    skipping anything the ROS/system Python provides, so the venv never holds a
+    copy that shadows a system package (unless the user explicitly allowed it).
+    The closure is resolved before anything is installed. If apt changes what
+    the system provides, `replan` revises the plan before pip runs. `verify`
+    raises if the plan does not fit the system; it runs once the system is
+    final, before the prompt when apt has nothing to install. Returns False
+    when nothing was applied (dry run or cancelled).
+    """
     for warning in plan.warnings:
         print(f"warning: {warning}")
 
     apt_pkgs = [item.apt_pkg for item in plan.apt if item.apt_pkg]
-    pip_reqs = [_pip_requirement(item) for item in plan.pip]
-    distro_names = [item.dep.name for item in plan.distro]
+    installed = venv_versions(venv, runner) if plan.pip or plan.distro else {}
+    pins = _pins_to_install(plan, venv, system, runner, installed)
 
     if dry_run:
         _print_plan(plan, venv)
-        _print_dry_run(apt_pkgs, pip_reqs, venv)
+        _print_dry_run(apt_pkgs, [pin.requirement for pin in pins], venv, system)
         return False
 
+    _warn_shadowing(installed, system)
     missing_apt = [pkg for pkg in apt_pkgs if not _apt_installed(pkg, runner)]
-    missing_pip = _missing_pip(plan.pip, venv, runner)
-    pip_reqs_to_install = [_pip_requirement(item) for item in missing_pip]
-    will_install = bool(missing_apt or pip_reqs_to_install)
+    if verify and not missing_apt:
+        verify()
 
-    if not will_install:
-        if distro_names or apt_pkgs or pip_reqs:
-            print("petal: all dependencies already satisfied")
-        else:
-            print("petal: no dependencies to install")
-        if workspace_root and manifest_path:
-            _write_lock_if_changed(
-                workspace_root / "petal.lock",
-                manifest_path,
-                [*plan.distro, *plan.apt, *plan.pip],
-            )
+    if not missing_apt and not pins:
+        print(
+            "petal: all dependencies already satisfied"
+            if plan.items()
+            else "petal: no dependencies to install"
+        )
+        if lock_path and stamp:
+            _write_lock_if_changed(lock_path, stamp, plan.items())
         return True
 
-    _print_changes(plan, missing_apt, missing_pip, venv)
+    _print_changes(plan, missing_apt, pins)
 
     if not _confirm_install(assume_yes=assume_yes, assume_no=assume_no):
         print("petal: install cancelled")
@@ -97,50 +96,35 @@ def execute(
             raise
         if proc.returncode != 0:
             raise InstallerError(proc.stderr or "apt install failed")
+        changed = system.refresh()
+        if verify:
+            verify()
+        if changed:
+            # New debs changed what the system provides, e.g. python3-scipy now
+            # satisfies a `scipy` requirement that was headed for PyPI.
+            if replan is not None:
+                plan = replan(plan)
+            pins = _pins_to_install(plan, venv, system, runner, installed)
     elif apt_pkgs:
         print("APT: already installed " + ", ".join(apt_pkgs))
 
-    if pip_reqs_to_install:
-        print("PIP: installing " + ", ".join(pip_reqs_to_install))
-        proc = install_runner(
-            [
-                "uv",
-                "pip",
-                "install",
-                "--python",
-                str(venv_python(venv)),
-                *pip_reqs_to_install,
-            ]
-        )
+    if pins:
+        reqs = [pin.requirement for pin in pins]
+        print("PIP: installing " + ", ".join(reqs))
+        proc = install_runner(pip_install_command(venv, system, reqs))
         if proc.returncode != 0:
-            pip_proc = install_runner(
-                [str(venv_python(venv)), "-m", "pip", "install", *pip_reqs_to_install]
-            )
-            if pip_proc.returncode != 0:
-                raise InstallerError(
-                    pip_proc.stderr or proc.stderr or "pip install failed"
-                )
+            raise InstallerError(proc.stderr or "pip install failed")
 
-    if not distro_names and not apt_pkgs and not pip_reqs:
-        print("petal: no dependencies to install")
-
-    if workspace_root and manifest_path:
-        write_lock(
-            workspace_root / "petal.lock",
-            manifest_path,
-            [*plan.distro, *plan.apt, *plan.pip],
-        )
-        print(f"lock: wrote {workspace_root / 'petal.lock'}")
+    if lock_path and stamp:
+        _write_lock_if_changed(lock_path, stamp, plan.items())
 
     return True
 
 
-def write_lock(
-    lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]
-) -> None:
+def write_lock(lock_path: Path, stamp: LockStamp, resolved: list[ResolvedDep]) -> None:
     lines = [
-        f'manifest_hash = "{manifest_hash(manifest_path)}"',
-        f'dependency_hash = "{dependency_hash([item.dep for item in resolved])}"',
+        f'manifest_hash = "{stamp.manifest_hash}"',
+        f'dependency_hash = "{stamp.dependency_hash}"',
         f'generated_at = "{datetime.now(timezone.utc).isoformat()}"',
         "",
     ]
@@ -150,38 +134,38 @@ def write_lock(
 
 
 def _write_lock_if_changed(
-    lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]
+    lock_path: Path, stamp: LockStamp, resolved: list[ResolvedDep]
 ) -> None:
-    if _lock_matches(lock_path, manifest_path, resolved):
+    if _lock_matches(lock_path, stamp, resolved):
         print("lock: unchanged")
         return
-    write_lock(lock_path, manifest_path, resolved)
+    write_lock(lock_path, stamp, resolved)
     print(f"lock: wrote {lock_path}")
 
 
 def _lock_matches(
-    lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]
+    lock_path: Path, stamp: LockStamp, resolved: list[ResolvedDep]
 ) -> bool:
+    """True when writing `resolved` would not change petal.lock's content."""
     lock = load_lock_or_none(lock_path)
-    if lock is None:
+    if lock is None or lock.stamp != stamp:
         return False
-    if lock.manifest_hash != manifest_hash(manifest_path):
-        return False
-    if lock.dependency_hash != dependency_hash([item.dep for item in resolved]):
-        return False
-    locked = {_frozen_key(item): item for item in lock.resolved}
-    planned = {_frozen_key(item): item for item in resolved}
-    if locked.keys() != planned.keys():
-        return False
-    for key, item in planned.items():
-        locked_item = locked[key]
-        if item.chosen_source != locked_item.chosen_source:
-            return False
-        if item.apt_pkg != locked_item.apt_pkg:
-            return False
-        if item.resolved_version != locked_item.resolved_version:
-            return False
-    return True
+
+    def entry(item: ResolvedDep) -> tuple[object, ...]:
+        version = "" if item.chosen_source == Source.DISTRO else item.resolved_version
+        dep = item.dep
+        return (
+            lock_key(item),
+            item.chosen_source,
+            item.apt_pkg,
+            version,
+            dep.version_spec,
+            dep.source_hint,
+        )
+
+    return sorted(map(entry, lock.resolved), key=repr) == sorted(
+        map(entry, resolved), key=repr
+    )
 
 
 def uninstall(
@@ -207,14 +191,20 @@ def uninstall(
 
 
 def _lock_entry(item: ResolvedDep) -> list[str]:
+    """One `[[resolved]]` table. System entries carry no version so the lock does
+    not change with whichever machine resolved it."""
     lines = [
         "[[resolved]]",
         f'name = "{item.dep.name}"',
         f'source = "{item.chosen_source.value}"',
     ]
+    if item.dep.version_spec:
+        lines.append(f'spec = "{item.dep.version_spec}"')
+    if item.dep.source_hint:
+        lines.append(f'hint = "{item.dep.source_hint.value}"')
     if item.apt_pkg:
         lines.append(f'apt_pkg = "{item.apt_pkg}"')
-    if item.resolved_version:
+    if item.resolved_version and item.chosen_source != Source.DISTRO:
         lines.append(f'version = "{item.resolved_version}"')
     lines.append("")
     return lines
@@ -226,12 +216,54 @@ def _pip_requirement(item: ResolvedDep) -> str:
     return dep_requirement(item.dep)
 
 
-def _missing_pip(
-    items: list[ResolvedDep], venv: Path, runner: Runner
-) -> list[ResolvedDep]:
-    if not items:
+def pip_install_command(venv: Path, system: SystemView, reqs: list[str]) -> list[str]:
+    """`uv pip install` for an already-resolved closure, guarded by system pins."""
+    python = str(venv_python(venv))
+    return [
+        *("uv", "pip", "install", "--python", python, "--no-deps"),
+        *system.constraint_args(),
+        *reqs,
+    ]
+
+
+def _pins_to_install(
+    plan: Plan,
+    venv: Path,
+    system: SystemView,
+    runner: Runner,
+    installed: dict[str, str],
+) -> list[Pin]:
+    """Pins pip must install: the resolved closure minus system and venv copies.
+
+    Empty when every top-level pip dep is already installed at its version.
+    """
+    if not _missing_pip(plan.pip, installed):
         return []
-    installed = _pip_versions(venv, runner)
+    reqs = [_pip_requirement(item) for item in plan.pip]
+    try:
+        pins = compile_requirements(reqs, venv, system, runner, installed)
+    except PipCompileError as exc:
+        raise InstallerError(f"pip dependencies cannot be resolved:\n{exc}") from exc
+    return [
+        pin
+        for pin in pins
+        if not system.protects(pin.name)
+        and not (pin.version and installed.get(pin.name) == pin.version)
+    ]
+
+
+def _warn_shadowing(installed: dict[str, str], system: SystemView) -> None:
+    """Flag venv copies of system packages, e.g. left by older petal versions."""
+    for name, version in sorted(system.shadowed_by(installed).items()):
+        print(
+            f"warning: .petal/venv has {name} {version}, shadowing the system's "
+            f"{system.version(name)}; run `petal clean && petal sync` to drop it"
+        )
+
+
+def _missing_pip(
+    items: list[ResolvedDep], installed: dict[str, str]
+) -> list[ResolvedDep]:
     missing: list[ResolvedDep] = []
     for item in items:
         key = pip_name(item.dep.name)
@@ -241,23 +273,8 @@ def _missing_pip(
     return missing
 
 
-def _pip_versions(venv: Path, runner: Runner) -> dict[str, str]:
-    proc = runner(
-        ["uv", "pip", "list", "--python", str(venv_python(venv)), "--format", "json"]
-    )
-    if proc.returncode != 0:
-        proc = runner([str(venv_python(venv)), "-m", "pip", "list", "--format", "json"])
-    if proc.returncode != 0:
-        return {}
-    try:
-        data = json.loads(proc.stdout or "[]")
-    except json.JSONDecodeError:
-        return {}
-    return {pip_name(str(item["name"])): str(item["version"]) for item in data}
-
-
 def _print_plan(plan: Plan, venv: Path) -> None:
-    items = [*plan.distro, *plan.apt, *plan.pip]
+    items = plan.items()
     if not items:
         return
     print(f"Resolved {len(items)} dependencies:")
@@ -276,15 +293,14 @@ def _print_plan(plan: Plan, venv: Path) -> None:
         )
 
 
-def _print_changes(
-    plan: Plan, missing_apt: list[str], missing_pip: list[ResolvedDep], venv: Path
-) -> None:
-    change_count = len(missing_apt) + len(missing_pip)
+def _print_changes(plan: Plan, missing_apt: list[str], pins: list[Pin]) -> None:
+    change_count = len(missing_apt) + len(pins)
     noun = "change" if change_count == 1 else "changes"
+    pin_names = {pin.name for pin in pins}
     satisfied = (
         len(plan.distro)
         + (len(plan.apt) - len(missing_apt))
-        + (len(plan.pip) - len(missing_pip))
+        + sum(1 for item in plan.pip if pip_name(item.dep.name) not in pin_names)
     )
     print(f"{change_count} {noun} to apply  ·  {satisfied} already satisfied")
     if missing_apt:
@@ -296,10 +312,10 @@ def _print_changes(
                 print(
                     f"    {item.dep.name} -> {item.apt_pkg or item.dep.name}{version}"
                 )
-    if missing_pip:
+    if pins:
         print("  pip:")
-        for item in missing_pip:
-            print(f"    {item.dep.name} -> {_pip_requirement(item)}")
+        for pin in pins:
+            print(f"    {pin.requirement}")
 
 
 def _confirm_install(*, assume_yes: bool, assume_no: bool) -> bool:
@@ -313,7 +329,9 @@ def _confirm_install(*, assume_yes: bool, assume_no: bool) -> bool:
     return answer in {"", "y", "yes"}
 
 
-def _print_dry_run(apt_pkgs: list[str], pip_reqs: list[str], venv: Path) -> None:
+def _print_dry_run(
+    apt_pkgs: list[str], pip_reqs: list[str], venv: Path, system: SystemView
+) -> None:
     if apt_pkgs:
         print("APT:")
         print("sudo apt-get install -y " + " ".join(apt_pkgs))
@@ -322,12 +340,7 @@ def _print_dry_run(apt_pkgs: list[str], pip_reqs: list[str], venv: Path) -> None
 
     if pip_reqs:
         print("PIP:")
-        print(
-            "uv pip install --python "
-            + str(venv_python(venv))
-            + " "
-            + " ".join(pip_reqs)
-        )
+        print(" ".join(pip_install_command(venv, system, pip_reqs)))
     else:
         print("PIP: no changes")
 
@@ -335,26 +348,3 @@ def _print_dry_run(apt_pkgs: list[str], pip_reqs: list[str], venv: Path) -> None
 def _apt_installed(pkg: str, runner: Runner) -> bool:
     proc = runner(["dpkg-query", "-W", "-f=${Status}", pkg])
     return proc.returncode == 0 and "install ok installed" in proc.stdout
-
-
-def _check_frozen(lock_path: Path, planned: list[ResolvedDep]) -> None:
-    locked = load_lock(lock_path).resolved
-    locked_map = {_frozen_key(item): item for item in locked}
-    planned_map = {_frozen_key(item): item for item in planned}
-    if locked_map.keys() != planned_map.keys():
-        raise InstallerError("resolved deps differ from petal.lock; run `petal sync`")
-    for key, planned_item in planned_map.items():
-        locked_item = locked_map[key]
-        if planned_item.chosen_source != locked_item.chosen_source:
-            raise InstallerError(f"{key} source differs from petal.lock")
-        if planned_item.apt_pkg != locked_item.apt_pkg:
-            raise InstallerError(f"{key} apt package differs from petal.lock")
-        if (
-            locked_item.resolved_version
-            and planned_item.resolved_version != locked_item.resolved_version
-        ):
-            raise InstallerError(f"{key} version differs from petal.lock")
-
-
-def _frozen_key(item: ResolvedDep) -> str:
-    return lock_key(item)

@@ -39,6 +39,20 @@ PyPI packages are installed into `.petal/venv`, not into system Python.
 
 The venv is always created with `--system-site-packages` so modules provided by ROS and apt, such as `rclpy`, remain importable at runtime.
 
+### Pip never shadows system packages
+
+ROS packages are built against the Python packages your system provides. A second copy of numpy or PyYAML in `.petal/venv` would take precedence over the system copy and can break them. Petal prevents this:
+
+- A Python requirement the system already satisfies, such as `requests>=2` from a `setup.cfg`, resolves to the system copy and installs nothing.
+- Every system distribution is pinned in `.petal/constraints.txt`. PyPI packages are resolved against those pins, and their dependencies are installed with `--no-deps`, minus anything the system provides.
+- If a requirement needs a different version than the system has, `petal sync` fails and shows uv's explanation instead of installing a shadowing copy.
+
+To shadow a system package on purpose, declare it as a pip dependency under `[deps]`, for example with `petal add --pip numpy ">=2"`, which writes `numpy = { pip = ">=2" }`. Such packages are left out of the constraints. `[overrides]` entries do not allow shadowing.
+
+When the system changes so that the lock no longer fits, for example because a dependency locked to the system no longer satisfies its version spec, or because a package locked to PyPI is now provided by the system, the next `petal sync` resolves again. System updates that keep the lock valid, such as a compatible `apt upgrade`, do not touch it.
+
+`petal sync` warns when `.petal/venv` already contains a copy of a system package, for example one installed by an older petal version. Run `petal clean && petal sync` to remove it.
+
 ## Manifest and lockfile
 
 Petal records requested dependencies in `petal.toml`:
@@ -49,7 +63,11 @@ numpy = ">=1.24"
 ultralytics = "*"
 ```
 
-After resolution and installation, Petal writes `petal.lock` with the resolved source for each dependency. Use `petal sync --frozen` to enforce the existing lockfile.
+After resolution and installation, Petal writes `petal.lock` with the resolved source for each dependency. The lock is safe to commit: it records what you declared, which source was chosen, and the pinned versions of your PyPI dependencies. System packages are recorded without versions, so the lock does not change with whichever machine resolved it.
+
+When Petal resolves again, it keeps locked and installed PyPI versions where they are still compatible. Adding one dependency does not upgrade the others.
+
+`petal sync --frozen` installs what `petal.lock` records and never rewrites it. It never chooses sources or versions for your dependencies. Their own dependencies are resolved against those pins and the system constraints. It fails if the lock is out of date with `petal.toml` or the workspace, or if the lock does not fit this machine's system packages. System packages that come from the lock's own apt entries are checked after apt has installed them.
 
 ## Docker and Petal
 

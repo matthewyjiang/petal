@@ -12,7 +12,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 only
     import tomli as tomllib
 
-from petal.models import Dep, Lock, Manifest, ResolvedDep, Source
+from petal.models import Dep, Lock, LockStamp, Manifest, ResolvedDep, Source
 
 _SECTION_RE = re.compile(r"^\s*\[[^\]]+\]\s*(?:#.*)?$")
 _KEY_RE = re.compile(r"^\s*(?P<key>[A-Za-z0-9_-]+|\"[^\"]+\")\s*=")
@@ -79,6 +79,12 @@ def remove_manifest_dep(path: Path, name: str) -> bool:
     return False
 
 
+def lock_stamp(manifest_path: Path, deps: list[Dep]) -> LockStamp:
+    """Stamp for a lock resolved from this manifest and these (input) deps."""
+    manifest = manifest_hash(manifest_path) if manifest_path.exists() else ""
+    return LockStamp(manifest, dependency_hash(deps))
+
+
 def manifest_hash(path: Path) -> str:
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     return f"sha256:{digest}"
@@ -86,7 +92,10 @@ def manifest_hash(path: Path) -> str:
 
 # Bump when resolution rules change so `petal sync` stops reusing locks that
 # were resolved under the old rules. 2: rosdep keys no longer fall back to PyPI.
-_RESOLUTION_POLICY = "2"
+# 3: Python requirements the ROS/system Python provides resolve to distro.
+# 4: the lock's dependency_hash covers the input deps, not the resolved ones.
+# 5: lock entries record their declared spec and hint.
+_RESOLUTION_POLICY = "5"
 
 
 def dependency_hash(deps: list[Dep]) -> str:
@@ -228,7 +237,12 @@ def load_lock(path: Path) -> Lock:
     resolved: list[ResolvedDep] = []
     for item in data.get("resolved", []) or []:
         source = Source(str(item["source"]))
-        dep = Dep(name=str(item["name"]))
+        hint = str(item.get("hint", ""))
+        dep = Dep(
+            name=str(item["name"]),
+            version_spec=str(item.get("spec", "")),
+            source_hint=Source(hint) if hint else None,
+        )
         resolved.append(
             ResolvedDep(
                 dep=dep,

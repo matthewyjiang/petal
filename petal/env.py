@@ -3,18 +3,16 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
-import sys
 from pathlib import Path
-
-ROS_ROOT = Path(os.environ.get("PETAL_ROS_ROOT", "/opt/ros"))
 
 
 class PetalEnvError(RuntimeError):
     """Environment detection failed."""
 
 
-def _ros_root() -> Path:
-    return Path(os.environ.get("PETAL_ROS_ROOT", str(ROS_ROOT)))
+def ros_root() -> Path:
+    """Directory holding ROS distros; PETAL_ROS_ROOT overrides it for tests."""
+    return Path(os.environ.get("PETAL_ROS_ROOT", "/opt/ros"))
 
 
 def detect_ros_distro() -> str:
@@ -22,7 +20,7 @@ def detect_ros_distro() -> str:
     if env_distro:
         return env_distro
 
-    root = _ros_root()
+    root = ros_root()
     candidates = sorted(p.name for p in root.glob("*") if (p / "setup.bash").is_file())
     if len(candidates) == 1:
         return candidates[0]
@@ -37,7 +35,7 @@ def detect_ros_distro() -> str:
 
 
 def distro_python(distro: str) -> Path:
-    distro_root = _ros_root() / distro
+    distro_root = ros_root() / distro
     lib_dirs = sorted((distro_root / "lib").glob("python3.*"))
     versions = [p.name.removeprefix("python") for p in lib_dirs if p.is_dir()]
     if not versions:
@@ -137,7 +135,7 @@ def _write_activate(workspace_root: Path, distro: str) -> Path:
     petal_dir.mkdir(parents=True, exist_ok=True)
     activate = petal_dir / "activate"
     workspace = workspace_root.resolve()
-    ros_dir = _ros_root() / distro
+    ros_dir = ros_root() / distro
     activate.write_text(
         "# Petal workspace activation\n"
         'if [ -n "${BASH_VERSION:-}" ] && [ "${BASH_SOURCE[0]}" = "$0" ]; then\n'
@@ -195,7 +193,7 @@ def _detect_shell() -> str:
 
 def _ros_setup_for_shell(distro: str, shell: str) -> Path | None:
     """Return the best ROS setup file for the given shell, or None if none exist."""
-    ros_dir = _ros_root() / distro
+    ros_dir = ros_root() / distro
     candidates = [f"setup.{shell}"]
     if shell != "sh":
         candidates.append("setup.sh")
@@ -227,29 +225,3 @@ def activation_snippet(
         ]
     )
     return "\n".join(lines) + "\n"
-
-
-def distro_provided_modules(distro: str) -> set[str]:
-    interpreter = distro_python(distro)
-    code = """
-import pkgutil
-mods = sorted({m.name for m in pkgutil.iter_modules()})
-print('\\n'.join(mods))
-"""
-    env = os.environ.copy()
-    ros_site = next((_ros_root() / distro / "lib").glob("python3.*"), None)
-    if ros_site:
-        site = ros_site / "site-packages"
-        env["PYTHONPATH"] = str(site) + os.pathsep + env.get("PYTHONPATH", "")
-    proc = subprocess.run(
-        [str(interpreter), "-c", code],
-        check=True,
-        text=True,
-        capture_output=True,
-        env=env,
-    )
-    return {line for line in proc.stdout.splitlines() if line}
-
-
-def current_python_version() -> str:
-    return f"{sys.version_info.major}.{sys.version_info.minor}"
