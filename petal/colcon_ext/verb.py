@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from petal import cli
 
-try:  # pragma: no cover - real colcon not required in unit tests
-    from colcon_core.verb import VerbExtensionPoint
-except ModuleNotFoundError:  # pragma: no cover
+# colcon is optional: without it, the verb is still importable for tests.
+if TYPE_CHECKING:
+    _VerbBase = object
+else:
+    try:  # pragma: no cover - real colcon not required in unit tests
+        from colcon_core.verb import VerbExtensionPoint as _VerbBase
+    except ModuleNotFoundError:  # pragma: no cover
+        _VerbBase = object
 
-    class VerbExtensionPoint:  # type: ignore[no-redef]
-        """Small fallback so tests/imports work without colcon installed."""
 
-
-class DepsVerb(VerbExtensionPoint):
+class DepsVerb(_VerbBase):
     """`colcon deps sync` wrapper around `petal sync`."""
 
     def add_arguments(self, *, parser) -> None:  # type: ignore[no-untyped-def]

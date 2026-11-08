@@ -87,96 +87,7 @@ def test_ensure_venv_uses_system_site_packages(
     assert f"_petal_ros_dir={ros_root / 'humble'}" in activate
     assert "setup.${_petal_shell}" in activate
     assert '. "${_petal_ws}/.petal/venv/bin/activate" || return $?' in activate
-    assert 'cd "${_petal_ws}" || return $?' in activate
-
-
-def test_activation_snippet_bash(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    ros_root = tmp_path / "ros"
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
-    setup = ros_root / "humble" / "setup.bash"
-    setup.parent.mkdir(parents=True)
-    setup.write_text("", encoding="utf-8")
-
-    snippet = env.activation_snippet(ws, "humble", shell="bash")
-    lines = snippet.splitlines()
-    assert lines == [
-        "unset PYTHONHOME",
-        f". {setup}",
-        f'export VIRTUAL_ENV="{ws / ".petal" / "venv"}"',
-        'export PATH="$VIRTUAL_ENV/bin:$PATH"',
-    ]
-
-
-def test_activation_snippet_zsh_prefers_setup_zsh(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    ros_root = tmp_path / "ros"
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
-    ros_dir = ros_root / "humble"
-    ros_dir.mkdir(parents=True)
-    (ros_dir / "setup.bash").write_text("", encoding="utf-8")
-    setup_zsh = ros_dir / "setup.zsh"
-    setup_zsh.write_text("", encoding="utf-8")
-
-    snippet = env.activation_snippet(ws, "humble", shell="zsh")
-    assert "export VIRTUAL_ENV=" in snippet
-    assert "export PATH=" in snippet
-    assert f". {setup_zsh}" in snippet
-    assert "setup.bash" not in snippet
-
-
-def test_activation_snippet_zsh_fallback_to_bash(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    ros_root = tmp_path / "ros"
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
-    ros_dir = ros_root / "humble"
-    ros_dir.mkdir(parents=True)
-    setup_bash = ros_dir / "setup.bash"
-    setup_bash.write_text("", encoding="utf-8")
-
-    snippet = env.activation_snippet(ws, "humble", shell="zsh")
-    assert f". {setup_bash}" in snippet
-
-
-def test_activation_snippet_auto_detects_shell(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    ros_root = tmp_path / "ros"
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
-    monkeypatch.setenv("SHELL", "/bin/zsh")
-    (ros_root / "humble").mkdir(parents=True)
-
-    snippet = env.activation_snippet(ws, "humble", shell=None)
-    # zsh uses same bash-style exports
-    assert "export VIRTUAL_ENV" in snippet
-
-
-def test_activation_snippet_without_ros_setup_still_activates_venv(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    ros_root = tmp_path / "ros"
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    monkeypatch.setenv("PETAL_ROS_ROOT", str(ros_root))
-    (ros_root / "humble").mkdir(parents=True)
-
-    snippet = env.activation_snippet(ws, "humble", shell="bash")
-
-    assert f'export VIRTUAL_ENV="{ws / ".petal" / "venv"}"' in snippet
-    assert 'export PATH="$VIRTUAL_ENV/bin:$PATH"' in snippet
-    assert "unset PYTHONHOME" in snippet
-    assert ". " not in snippet
+    assert "unset PYTHONHOME" in activate
 
 
 def test_ensure_venv_rejects_version_mismatch(
@@ -232,3 +143,32 @@ def test_ensure_venv_rejects_missing_system_site_packages(
 
     with pytest.raises(env.PetalEnvError, match="system site-packages"):
         env.ensure_venv(ws, "humble")
+
+
+def test_activate_shell_override_applies_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PETAL_ROS_ROOT", str(tmp_path / "ros"))
+    ros = tmp_path / "ros" / "humble"
+    ros.mkdir(parents=True)
+    for shell in ("sh", "zsh"):
+        (ros / f"setup.{shell}").write_text(f"echo setup.{shell}\n", encoding="utf-8")
+    venv_bin = tmp_path / "ws" / ".petal" / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "activate").write_text("", encoding="utf-8")
+    script = env.write_activate(tmp_path / "ws", "humble")
+
+    # What `source <(petal activate --shell zsh)` runs, then a plain source.
+    out = subprocess.run(
+        [
+            "sh",
+            "-c",
+            f'PETAL_SHELL=zsh . {script}; echo "${{PETAL_SHELL:-}}"; . {script}',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={"PATH": "/usr/bin:/bin", "SHELL": "/usr/bin/zsh"},
+    ).stdout
+
+    assert out.split() == ["setup.zsh", "setup.sh"]

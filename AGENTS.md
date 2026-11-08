@@ -10,9 +10,12 @@
 ## Architecture
 
 - CLI entry point is `petal.cli:main`; colcon verb entry point is `petal.colcon_ext.verb:DepsVerb`.
-- Core flow for `petal sync`: `discover_workspace` -> `ResolutionManager` -> `build_plan` -> `installer.execute`.
+- Core flow for `petal sync` (`cli._sync`): `discover_workspace` + `inspect_system_python` -> `ResolutionManager.resolve_all` -> `build_plan` -> `installer.execute`, which re-plans PyPI choices if apt changed the system.
+- `petal/host.py` is the boundary to the machine (subprocess runners, venv creation, ROS detection, system inspection). The CLI does all side effects through a `Host`; tests pass a fake one.
+- `petal/system.py` owns the view of ROS/system Python packages and `.petal/constraints.txt`; pip must never install a copy of a protected system distribution.
 - Data contracts live in `petal/models.py`; keep resolver/planner/installer code using `Dep`, `ResolvedDep`, and `Source` instead of ad hoc dicts.
-- `SPEC.md` is the build spec; `PROGRESS.md` tracks completed milestones and next hardening items.
+- `petal.lock` must stay machine-independent: `LockStamp` covers declared inputs only; whether a lock fits the local system is `lock_mismatch`.
+- Changing how deps resolve? Bump `config._RESOLUTION_POLICY` so old locks are re-resolved.
 
 ## ROS/Python Constraints
 

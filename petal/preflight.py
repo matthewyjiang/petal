@@ -40,7 +40,7 @@ def check() -> PreflightReport:
         for tool in ("apt-cache", "apt-get", "dpkg-query"):
             if not shutil.which(tool):
                 report.warnings.append(
-                    f"{tool} not found. apt-based dependency resolution will be skipped."
+                    f"{tool} not found; apt packages cannot be resolved or installed."
                 )
 
     return report
@@ -49,8 +49,8 @@ def check() -> PreflightReport:
 def assert_ok(report: PreflightReport) -> None:
     """Print warnings, then raise SystemExit if there are errors."""
     for warning in report.warnings:
-        print(f"petal: warning: {warning}", file=__import__("sys").stderr)
+        print(f"petal: warning: {warning}", file=sys.stderr)
     if not report.ok:
         for error in report.errors:
-            print(f"petal: error: {error}", file=__import__("sys").stderr)
+            print(f"petal: error: {error}", file=sys.stderr)
         raise SystemExit(1)

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-import re
+from collections.abc import Mapping
 from pathlib import Path
+
+import tomlkit
+from tomlkit.toml_document import TOMLDocument
 
 from petal.identity import dep_key as canonical_dep_key
 from petal.identity import pip_name, python_apt_package
@@ -13,9 +16,6 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 only
     import tomli as tomllib
 
 from petal.models import Dep, Lock, LockStamp, Manifest, ResolvedDep, Source
-
-_SECTION_RE = re.compile(r"^\s*\[[^\]]+\]\s*(?:#.*)?$")
-_KEY_RE = re.compile(r"^\s*(?P<key>[A-Za-z0-9_-]+|\"[^\"]+\")\s*=")
 
 
 def find_workspace_root(start: Path | None = None) -> Path:
@@ -36,17 +36,12 @@ def find_workspace_root(start: Path | None = None) -> Path:
     return current
 
 
-def write_manifest(path: Path, *, ros_distro: str, python_version: str) -> None:
-    path.write_text(
-        "[workspace]\n"
-        f'ros_distro = "{ros_distro}"\n'
-        f'python_version = "{python_version}"\n'
-        "\n"
-        "[deps]\n"
-        "\n"
-        "[overrides]\n",
-        encoding="utf-8",
-    )
+def write_manifest(path: Path, *, ros_distro: str) -> None:
+    doc = tomlkit.document()
+    doc["workspace"] = {"ros_distro": ros_distro}
+    doc["deps"] = tomlkit.table()
+    doc["overrides"] = tomlkit.table()
+    path.write_text(tomlkit.dumps(doc), encoding="utf-8")
 
 
 def add_manifest_dep(
@@ -57,36 +52,53 @@ def add_manifest_dep(
     source_hint: Source | None = None,
     apt_pkg: str = "",
 ) -> None:
-    lines = _manifest_lines(path)
-    start, end = _deps_span(lines)
-    entry = _render_dep_entry(name, version_spec, source_hint, apt_pkg)
-    key = pip_name(name)
+    """Add or update `name` in [deps], keeping the rest of the file as written.
 
-    for index in range(start, end):
-        if _line_key(lines[index]) == key:
-            lines[index] = _render_dep_entry(
-                _raw_line_key(lines[index]) or name, version_spec, source_hint, apt_pkg
-            )
-            _write_manifest_lines(path, lines)
-            return
-
-    insert_at = end
-    while insert_at > start and not lines[insert_at - 1].strip():
-        insert_at -= 1
-    lines.insert(insert_at, entry)
-    _write_manifest_lines(path, lines)
+    An existing entry whose name differs only by PEP 503 normalization is
+    updated in place under its original spelling.
+    """
+    doc = _load_document(path)
+    deps = doc.setdefault("deps", tomlkit.table())
+    key = _manifest_key(deps, name) or name
+    spec = version_spec or "*"
+    if source_hint == Source.PIP:
+        value = tomlkit.inline_table()
+        value["pip"] = spec
+    elif source_hint == Source.APT:
+        value = tomlkit.inline_table()
+        value["apt"] = apt_pkg or python_apt_package(name)
+    else:
+        value = spec
+    deps[key] = value
+    path.write_text(tomlkit.dumps(doc), encoding="utf-8")
 
 
 def remove_manifest_dep(path: Path, name: str) -> bool:
-    lines = _manifest_lines(path)
-    start, end = _deps_span(lines)
+    """Remove `name` (matched by PEP 503 name) from [deps]; False if absent."""
+    doc = _load_document(path)
+    deps = doc.get("deps")
+    key = _manifest_key(deps, name) if deps is not None else None
+    if deps is None or key is None:
+        return False
+    del deps[key]
+    path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    return True
+
+
+def manifest_has_dep(path: Path, name: str) -> bool:
+    """True when [deps] has `name`, matched by PEP 503 name."""
+    deps = _load_document(path).get("deps")
+    return deps is not None and _manifest_key(deps, name) is not None
+
+
+def _load_document(path: Path) -> TOMLDocument:
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    return tomlkit.parse(text)
+
+
+def _manifest_key(deps: Mapping[str, object], name: str) -> str | None:
     key = pip_name(name)
-    for index in range(start, end):
-        if _line_key(lines[index]) == key:
-            del lines[index]
-            _write_manifest_lines(path, lines)
-            return True
-    return False
+    return next((existing for existing in deps if pip_name(existing) == key), None)
 
 
 def lock_stamp(manifest_path: Path, deps: list[Dep]) -> LockStamp:
@@ -128,75 +140,6 @@ def dependency_hash(deps: list[Dep]) -> str:
     return f"sha256:{digest}"
 
 
-def _manifest_lines(path: Path) -> list[str]:
-    if not path.exists():
-        return []
-    text = path.read_text(encoding="utf-8")
-    return text.splitlines()
-
-
-def _write_manifest_lines(path: Path, lines: list[str]) -> None:
-    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-
-
-def _deps_span(lines: list[str]) -> tuple[int, int]:
-    for index, line in enumerate(lines):
-        if line.strip() == "[deps]":
-            start = index + 1
-            end = len(lines)
-            for next_index in range(start, len(lines)):
-                if _SECTION_RE.match(lines[next_index]):
-                    end = next_index
-                    break
-            return start, end
-
-    if lines and lines[-1].strip():
-        lines.append("")
-    lines.append("[deps]")
-    return len(lines), len(lines)
-
-
-def _render_dep_entry(
-    name: str,
-    version_spec: str,
-    source_hint: Source | None,
-    apt_pkg: str,
-) -> str:
-    key = _toml_key(name)
-    spec = version_spec or "*"
-    if source_hint == Source.PIP:
-        return f'{key} = {{ pip = "{_escape_toml_string(spec)}" }}'
-    if source_hint == Source.APT:
-        pkg = apt_pkg or python_apt_package(name)
-        return f'{key} = {{ apt = "{_escape_toml_string(pkg)}" }}'
-    return f'{key} = "{_escape_toml_string(spec)}"'
-
-
-def _line_key(line: str) -> str:
-    key = _raw_line_key(line)
-    return pip_name(key) if key else ""
-
-
-def _raw_line_key(line: str) -> str:
-    match = _KEY_RE.match(line)
-    if not match:
-        return ""
-    key = match.group("key")
-    if key.startswith('"') and key.endswith('"'):
-        key = key[1:-1]
-    return key
-
-
-def _toml_key(name: str) -> str:
-    if re.fullmatch(r"[A-Za-z0-9_-]+", name):
-        return name
-    return f'"{_escape_toml_string(name)}"'
-
-
-def _escape_toml_string(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
 def load_manifest(path: Path) -> Manifest:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     workspace = data.get("workspace", {})
@@ -223,7 +166,6 @@ def load_manifest(path: Path) -> Manifest:
                 )
     return Manifest(
         ros_distro=str(workspace.get("ros_distro", "")),
-        python_version=str(workspace.get("python_version", "")),
         deps=deps,
     )
 

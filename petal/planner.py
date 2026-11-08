@@ -41,7 +41,7 @@ def build_plan(resolved: list[ResolvedDep]) -> Plan:
     for dep in resolved:
         if dep.chosen_source == Source.DISTRO:
             plan.distro.append(dep)
-        elif dep.chosen_source in {Source.APT, Source.ROSDEP}:
+        elif dep.chosen_source == Source.APT:
             plan.apt.append(dep)
         elif dep.chosen_source == Source.PIP:
             plan.pip.append(dep)

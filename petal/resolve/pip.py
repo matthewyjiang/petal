@@ -64,8 +64,6 @@ def venv_versions(venv: Path, runner: Runner) -> dict[str, str]:
         ["uv", "pip", "list", "--python", str(venv_python(venv)), "--format", "json"]
     )
     if proc.returncode != 0:
-        proc = runner([str(venv_python(venv)), "-m", "pip", "list", "--format", "json"])
-    if proc.returncode != 0:
         return {}
     try:
         data = json.loads(proc.stdout or "[]")

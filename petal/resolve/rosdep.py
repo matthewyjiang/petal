@@ -9,9 +9,6 @@ class RosdepResolver:
         self.ros_distro = ros_distro
         self.runner = runner
 
-    def can_resolve(self, dep: Dep) -> bool:
-        return self.resolve(dep) is not None
-
     def resolve(self, dep: Dep) -> ResolvedDep | None:
         proc = self.runner(
             ["rosdep", "resolve", dep.name, "--rosdistro", self.ros_distro]
