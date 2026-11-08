@@ -162,7 +162,8 @@ def write_activate(workspace_root: Path, distro: str) -> Path:
         '  elif [ -n "${BASH_VERSION:-}" ]; then\n'
         "    _petal_shell=bash\n"
         "  else\n"
-        '    _petal_shell=$(basename "${SHELL:-sh}")\n'
+        # Not $SHELL: that is the login shell, not the one sourcing this.
+        "    _petal_shell=sh\n"
         "  fi\n"
         "fi\n"
         "\n"
@@ -179,7 +180,8 @@ def write_activate(workspace_root: Path, distro: str) -> Path:
         "\n"
         "unset PYTHONHOME\n"
         '. "${_petal_ws}/.petal/venv/bin/activate" || return $?\n'
-        "unset _petal_ws _petal_ros_dir _petal_shell\n",
+        # `PETAL_SHELL=x . script` keeps the assignment in POSIX shells.
+        "unset _petal_ws _petal_ros_dir _petal_shell PETAL_SHELL\n",
         encoding="utf-8",
     )
     activate.chmod(0o755)

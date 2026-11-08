@@ -143,3 +143,32 @@ def test_ensure_venv_rejects_missing_system_site_packages(
 
     with pytest.raises(env.PetalEnvError, match="system site-packages"):
         env.ensure_venv(ws, "humble")
+
+
+def test_activate_shell_override_applies_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PETAL_ROS_ROOT", str(tmp_path / "ros"))
+    ros = tmp_path / "ros" / "humble"
+    ros.mkdir(parents=True)
+    for shell in ("sh", "zsh"):
+        (ros / f"setup.{shell}").write_text(f"echo setup.{shell}\n", encoding="utf-8")
+    venv_bin = tmp_path / "ws" / ".petal" / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "activate").write_text("", encoding="utf-8")
+    script = env.write_activate(tmp_path / "ws", "humble")
+
+    # What `source <(petal activate --shell zsh)` runs, then a plain source.
+    out = subprocess.run(
+        [
+            "sh",
+            "-c",
+            f'PETAL_SHELL=zsh . {script}; echo "${{PETAL_SHELL:-}}"; . {script}',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={"PATH": "/usr/bin:/bin", "SHELL": "/usr/bin/zsh"},
+    ).stdout
+
+    assert out.split() == ["setup.zsh", "setup.sh"]
