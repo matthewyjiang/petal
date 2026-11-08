@@ -25,6 +25,8 @@ class ResolvedDep:
     chosen_source: Source
     resolved_version: str = ""
     apt_pkg: str = ""
+    # A PyPI package pulled in by other pip deps rather than declared.
+    transitive: bool = False
 
 
 @dataclass

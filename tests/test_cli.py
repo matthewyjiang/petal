@@ -75,6 +75,15 @@ def test_sync_installs_apt_and_pypi_without_shadowing_the_system(tmp_path, capsy
         "hint": "pip",
         "version": "13.7.0",
     }
+    # The lock pins the whole closure rich pulls in, including pygments, which
+    # this system provides and a machine without it installs at this version.
+    assert entries["markdown-it-py"] == {
+        "name": "markdown-it-py",
+        "source": "pip",
+        "version": "3.0.0",
+        "transitive": True,
+    }
+    assert entries["pygments"]["version"] == "2.18.0"
     assert "lock: wrote" in capsys.readouterr().out
 
 
@@ -154,10 +163,13 @@ def test_resolving_again_keeps_locked_versions(tmp_path):  # type: ignore[no-unt
     machine, ws = ros_machine(), app_workspace(tmp_path)
     petal(machine, ws, "sync", "--yes")
     machine.pypi["rich"] = ("14.0.0", ["markdown-it-py", "pygments"])
+    machine.pypi["markdown-it-py"] = ("4.0.0", [])
 
     assert petal(machine, ws, "add", "httpx", "--yes") == 0
 
-    assert lock_entries(ws)["rich"]["version"] == "13.7.0"
+    entries = lock_entries(ws)
+    assert entries["rich"]["version"] == "13.7.0"
+    assert entries["markdown-it-py"]["version"] == "3.0.0"
     assert machine.venv["rich"] == "13.7.0"
 
 
@@ -200,6 +212,18 @@ def test_deb_installed_by_apt_satisfies_a_pypi_bound_requirement(tmp_path):  # t
     assert entries["python3-mdurl"]["source"] == "apt"
 
 
+def test_installed_direct_reference_is_not_reinstalled(tmp_path, capsys):  # type: ignore[no-untyped-def]
+    machine = ros_machine()
+    ws = workspace(
+        tmp_path, deps='mylib = { pip = "@ git+https://example.com/mylib" }\n'
+    )
+    assert petal(machine, ws, "sync", "--yes") == 0
+    assert machine.venv["mylib"] == "0.1.0"
+
+    assert petal(machine, ws, "sync") == 0  # no prompt needed
+    assert "all dependencies already satisfied" in capsys.readouterr().out
+
+
 # --- frozen --------------------------------------------------------------------
 
 
@@ -207,16 +231,30 @@ def test_frozen_on_a_fresh_machine_installs_the_lock_as_recorded(tmp_path):  # t
     author, ws = ros_machine(), app_workspace(tmp_path / "a")
     petal(author, ws, "sync", "--yes")
     lock = (ws / "petal.lock").read_bytes()
-    author.pypi["rich"] = ("14.0.0", ["markdown-it-py", "pygments"])  # released since
+    # Released since the lock was written.
+    author.pypi["rich"] = ("14.0.0", ["markdown-it-py", "pygments"])
+    author.pypi["markdown-it-py"] = ("4.0.0", [])
 
     ci = ros_machine()
     ci.pypi = author.pypi
     assert petal(ci, ws, "sync", "--frozen") == 0
 
-    assert not ci.ran("rosdep")
+    assert not ci.ran("rosdep") and not ci.ran("uv", "pip", "compile")
     assert ci.apt_installed == {"python3-numpy"}
-    assert ci.venv["rich"] == "13.7.0"
+    assert ci.venv == author.venv
     assert (ws / "petal.lock").read_bytes() == lock
+
+
+def test_frozen_on_a_machine_without_a_system_package_the_author_had(tmp_path):  # type: ignore[no-untyped-def]
+    author, ws = ros_machine(), app_workspace(tmp_path)
+    petal(author, ws, "sync", "--yes")
+
+    ci = ros_machine()
+    del ci.system["pygments"]  # the author's machine had python3-pygments
+    assert petal(ci, ws, "sync", "--frozen") == 0
+
+    assert ci.venv["pygments"] == "2.18.0"  # the version the author ran against
+    assert petal(ci, ws, "status") == 0
 
 
 def test_frozen_fails_when_inputs_changed(tmp_path, capsys):  # type: ignore[no-untyped-def]
@@ -335,8 +373,20 @@ def test_remove_drops_the_dep_uninstalls_and_rewrites_the_lock(tmp_path):  # typ
 
     deps = tomllib.loads((ws / "petal.toml").read_text(encoding="utf-8"))["deps"]
     assert deps == {"rich": "*"}
-    assert "httpx" not in machine.venv
+    assert "httpx" not in machine.venv and "idna" not in machine.venv
     assert "httpx" not in lock_entries(ws) and "rich" in lock_entries(ws)
+
+
+def test_remove_keeps_a_dep_another_one_still_needs(tmp_path):  # type: ignore[no-untyped-def]
+    machine = ros_machine()
+    ws = workspace(tmp_path, deps='rich = "*"\nmarkdown-it-py = "*"\n')
+    petal(machine, ws, "sync", "--yes")
+
+    assert petal(machine, ws, "remove", "markdown-it-py") == 0
+
+    assert machine.venv["markdown-it-py"] == "3.0.0"  # rich pulls it in
+    assert lock_entries(ws)["markdown-it-py"]["transitive"] is True
+    assert petal(machine, ws, "status") == 0
 
 
 def test_remove_matches_the_manifest_key_not_the_apt_package(tmp_path, capsys):  # type: ignore[no-untyped-def]

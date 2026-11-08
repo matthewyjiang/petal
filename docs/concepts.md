@@ -63,11 +63,11 @@ numpy = ">=1.24"
 ultralytics = "*"
 ```
 
-After resolution and installation, Petal writes `petal.lock` with the resolved source for each dependency. The lock is safe to commit: it records what you declared, which source was chosen, and the pinned versions of your PyPI dependencies. System packages are recorded without versions, so the lock does not change with whichever machine resolved it.
+After resolution and installation, Petal writes `petal.lock` with the resolved source for each dependency. The lock is safe to commit: it records what you declared, which source was chosen, and pinned versions for the whole PyPI closure: your PyPI dependencies and everything they pull in (marked `transitive`). A pulled-in package that the system provides is pinned too: Petal leaves it to the system here, and a machine without it installs the locked version. System packages are recorded without versions, so the lock does not change with whichever machine resolved it.
 
 When Petal resolves again, it keeps locked and installed PyPI versions where they are still compatible. Adding one dependency does not upgrade the others.
 
-`petal sync --frozen` installs what `petal.lock` records and never rewrites it. It never chooses sources or versions for your dependencies. Their own dependencies are resolved against those pins and the system constraints. It fails if the lock is out of date with `petal.toml` or the workspace, or if the lock does not fit this machine's system packages. System packages that come from the lock's own apt entries are checked after apt has installed them.
+`petal sync --frozen` installs exactly what `petal.lock` records and never rewrites it. It resolves nothing: apt gets the locked debs and pip gets the locked pins with `--no-deps`. It fails if the lock is out of date with `petal.toml` or the workspace, or if the lock does not fit this machine's system packages. System packages that come from the lock's own apt entries are checked after apt has installed them.
 
 ## Docker and Petal
 

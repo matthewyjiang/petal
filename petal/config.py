@@ -118,7 +118,8 @@ def manifest_hash(path: Path) -> str:
 # 4: the lock's dependency_hash covers the input deps, not the resolved ones.
 # 5: lock entries record their declared spec and hint.
 # 6: apt candidates must satisfy the declared version spec.
-_RESOLUTION_POLICY = "6"
+# 7: the lock pins the whole PyPI closure, not just declared deps.
+_RESOLUTION_POLICY = "7"
 
 
 def dependency_hash(deps: list[Dep]) -> str:
@@ -202,6 +203,7 @@ def load_lock(path: Path) -> Lock:
                 chosen_source=source,
                 resolved_version=str(item.get("version", "")),
                 apt_pkg=str(item.get("apt_pkg", "")),
+                transitive=bool(item.get("transitive", False)),
             )
         )
     return Lock(

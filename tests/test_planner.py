@@ -86,3 +86,10 @@ def test_incompatible_shadow_conflict_still_fails_before_install() -> None:
                 resolved("NumPy", Source.PIP, "==1.21", "pkg_b"),
             ]
         )
+
+
+def test_no_shadow_warning_for_a_pulled_in_pip_pin() -> None:
+    apt = resolved("protobuf", Source.APT, "", "pkg_a", "libprotobuf-dev")
+    pulled_in = ResolvedDep(Dep("protobuf"), Source.PIP, "5.29.0", transitive=True)
+
+    assert build_plan([apt, pulled_in]).warnings == []

@@ -19,7 +19,7 @@ from petal.resolve.base import (
     dep_requirement,
     venv_python,
 )
-from petal.resolve.pip import Pin, PipCompileError, compile_requirements, venv_versions
+from petal.resolve.pip import venv_versions
 from petal.system import SystemView
 
 
@@ -44,10 +44,10 @@ def execute(
 ) -> bool:
     """Install what `plan` needs, then record it in `lock_path` stamped `stamp`.
 
-    Pip packages are installed as a fully resolved closure with `--no-deps`,
-    skipping anything the ROS/system Python provides, so the venv never holds a
-    copy that shadows a system package (unless the user explicitly allowed it).
-    The closure is resolved before anything is installed. If apt changes what
+    The plan pins the whole PyPI closure, so pip installs exactly those pins
+    with `--no-deps`, skipping anything the ROS/system Python provides; the venv
+    never holds a copy that shadows a system package (unless the user explicitly
+    allowed it) and installing never resolves anything. If apt changes what
     the system provides, `replan` revises the plan before pip runs. `verify`
     raises if the plan does not fit the system; it runs once the system is
     final, before the prompt when apt has nothing to install. Returns False
@@ -58,11 +58,11 @@ def execute(
 
     apt_pkgs = [item.apt_pkg for item in plan.apt if item.apt_pkg]
     installed = venv_versions(venv, runner) if plan.pip or plan.distro else {}
-    pins = _pins_to_install(plan, venv, system, runner, installed)
+    pins = _pins_to_install(plan, system, installed)
 
     if dry_run:
         _print_plan(plan, venv)
-        _print_dry_run(apt_pkgs, [pin.requirement for pin in pins], venv, system)
+        _print_dry_run(apt_pkgs, pins, venv, system)
         return False
 
     _warn_shadowing(installed, system)
@@ -106,14 +106,13 @@ def execute(
             # satisfies a `scipy` requirement that was headed for PyPI.
             if replan is not None:
                 plan = replan(plan)
-            pins = _pins_to_install(plan, venv, system, runner, installed)
+            pins = _pins_to_install(plan, system, installed)
     elif apt_pkgs:
         print("APT: already installed " + ", ".join(apt_pkgs))
 
     if pins:
-        reqs = [pin.requirement for pin in pins]
-        print("PIP: installing " + ", ".join(reqs))
-        proc = install_runner(pip_install_command(venv, system, reqs))
+        print("PIP: installing " + ", ".join(pins))
+        proc = install_runner(pip_install_command(venv, system, pins))
         if proc.returncode != 0:
             raise InstallerError(proc.stderr or "pip install failed")
 
@@ -163,6 +162,7 @@ def _lock_matches(
             version,
             dep.version_spec,
             dep.source_hint,
+            item.transitive,
         )
 
     return sorted(map(entry, lock.resolved), key=repr) == sorted(
@@ -171,13 +171,15 @@ def _lock_matches(
 
 
 def uninstall(
-    name: str,
+    names: list[str],
     venv: Path,
     *,
     dry_run: bool = False,
     runner: Runner = default_runner,
 ) -> None:
-    uv_cmd = ["uv", "pip", "uninstall", "--python", str(venv_python(venv)), name]
+    if not names:
+        return
+    uv_cmd = ["uv", "pip", "uninstall", "--python", str(venv_python(venv)), *names]
     if dry_run:
         print("PIP uninstall:")
         print(" ".join(uv_cmd))
@@ -188,10 +190,13 @@ def uninstall(
         raise InstallerError(proc.stderr or "pip uninstall failed")
 
 
-def _lock_entry(item: ResolvedDep) -> dict[str, str]:
+def _lock_entry(item: ResolvedDep) -> dict[str, str | bool]:
     """One `[[resolved]]` table. System entries carry no version so the lock does
     not change with whichever machine resolved it."""
-    entry = {"name": item.dep.name, "source": item.chosen_source.value}
+    entry: dict[str, str | bool] = {
+        "name": item.dep.name,
+        "source": item.chosen_source.value,
+    }
     if item.dep.version_spec:
         entry["spec"] = item.dep.version_spec
     if item.dep.source_hint:
@@ -200,6 +205,8 @@ def _lock_entry(item: ResolvedDep) -> dict[str, str]:
         entry["apt_pkg"] = item.apt_pkg
     if item.resolved_version and item.chosen_source != Source.DISTRO:
         entry["version"] = item.resolved_version
+    if item.transitive:
+        entry["transitive"] = True
     return entry
 
 
@@ -220,29 +227,23 @@ def pip_install_command(venv: Path, system: SystemView, reqs: list[str]) -> list
 
 
 def _pins_to_install(
-    plan: Plan,
-    venv: Path,
-    system: SystemView,
-    runner: Runner,
-    installed: dict[str, str],
-) -> list[Pin]:
-    """Pins pip must install: the resolved closure minus system and venv copies.
-
-    Empty when every top-level pip dep is already installed at its version.
-    """
-    if not _missing_pip(plan.pip, installed):
-        return []
-    reqs = [_pip_requirement(item) for item in plan.pip]
-    try:
-        pins = compile_requirements(reqs, venv, system, runner, installed)
-    except PipCompileError as exc:
-        raise InstallerError(f"pip dependencies cannot be resolved:\n{exc}") from exc
+    plan: Plan, system: SystemView, installed: dict[str, str]
+) -> list[str]:
+    """Requirements pip must install: planned pins the system does not provide
+    and the venv does not already have."""
     return [
-        pin
-        for pin in pins
-        if not system.protects(pin.name)
-        and not (pin.version and installed.get(pin.name) == pin.version)
+        _pip_requirement(item)
+        for item in plan.pip
+        if not system.protects(item.dep.name) and _missing(item, installed)
     ]
+
+
+def _missing(item: ResolvedDep, installed: dict[str, str]) -> bool:
+    actual = installed.get(pip_name(item.dep.name))
+    if actual is None:
+        return True
+    # Direct references (`pkg @ git+...`) have no version to compare.
+    return bool(item.resolved_version) and actual != item.resolved_version
 
 
 def _warn_shadowing(installed: dict[str, str], system: SystemView) -> None:
@@ -254,24 +255,15 @@ def _warn_shadowing(installed: dict[str, str], system: SystemView) -> None:
         )
 
 
-def _missing_pip(
-    items: list[ResolvedDep], installed: dict[str, str]
-) -> list[ResolvedDep]:
-    missing: list[ResolvedDep] = []
-    for item in items:
-        key = pip_name(item.dep.name)
-        actual = installed.get(key)
-        if not actual or (item.resolved_version and actual != item.resolved_version):
-            missing.append(item)
-    return missing
-
-
 def _print_plan(plan: Plan, venv: Path) -> None:
     items = plan.items()
     if not items:
         return
-    print(f"Resolved {len(items)} dependencies:")
+    pulled_in = sum(item.transitive for item in items)
+    print(f"Resolved {len(items) - pulled_in} dependencies:")
     for item in plan.distro:
+        if item.transitive:
+            continue
         version = f" {item.resolved_version}" if item.resolved_version else ""
         print(f"  {item.dep.name:<24} distro   provided by ROS/system{version}")
     for item in plan.apt:
@@ -280,21 +272,20 @@ def _print_plan(plan: Plan, venv: Path) -> None:
         version = f" {item.resolved_version}" if item.resolved_version else ""
         print(f"  {item.dep.name:<24} {source:<9} {target}{version}")
     for item in plan.pip:
+        if item.transitive:
+            continue
         print(
             f"  {item.dep.name:<24} pip      "
             f"{_pip_requirement(item)} -> {venv_python(venv)}"
         )
+    if pulled_in:
+        print(f"  plus {pulled_in} packages they depend on")
 
 
-def _print_changes(plan: Plan, missing_apt: list[str], pins: list[Pin]) -> None:
+def _print_changes(plan: Plan, missing_apt: list[str], pins: list[str]) -> None:
     change_count = len(missing_apt) + len(pins)
     noun = "change" if change_count == 1 else "changes"
-    pin_names = {pin.name for pin in pins}
-    satisfied = (
-        len(plan.distro)
-        + (len(plan.apt) - len(missing_apt))
-        + sum(1 for item in plan.pip if pip_name(item.dep.name) not in pin_names)
-    )
+    satisfied = len(plan.items()) - change_count
     print(f"{change_count} {noun} to apply  ·  {satisfied} already satisfied")
     if missing_apt:
         print("  apt:")
@@ -308,7 +299,7 @@ def _print_changes(plan: Plan, missing_apt: list[str], pins: list[Pin]) -> None:
     if pins:
         print("  pip:")
         for pin in pins:
-            print(f"    {pin.requirement}")
+            print(f"    {pin}")
 
 
 def _confirm_install(*, assume_yes: bool, assume_no: bool) -> bool:

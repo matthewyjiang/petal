@@ -10,7 +10,7 @@ from petal.identity import pip_name, python_apt_package
 from petal.models import Dep, ResolvedDep, Source
 from petal.planner import PlannerConflict
 from petal.resolve.apt import AptResolver, _candidate_version
-from petal.resolve.base import upstream_version
+from petal.resolve.base import dep_requirement, upstream_version
 from petal.resolve.distro import DistroResolver
 from petal.resolve.manager import (
     ResolutionManager,
@@ -183,7 +183,7 @@ def test_resolution_manager_source_order(tmp_path: Path) -> None:
 
     manager = manager_for(tmp_path, system(modules={"rclpy"}), runner)
     ml = Dep("ml_collections", ">=0.1.1")
-    rclpy, numpy, ml_resolved, again = manager.resolve_all(
+    rclpy, numpy, ml_resolved, again, absl = manager.resolve_all(
         [
             Dep("rclpy", source_hint=Source.ROSDEP),
             Dep("numpy", source_hint=Source.ROSDEP),
@@ -197,6 +197,8 @@ def test_resolution_manager_source_order(tmp_path: Path) -> None:
     assert ml_resolved.chosen_source == Source.PIP
     assert ml_resolved.resolved_version == "0.1.1"
     assert again == ml_resolved
+    # The lock pins what ml_collections pulls in, too.
+    assert absl == ResolvedDep(Dep("absl-py"), Source.PIP, "2.1.0", transitive=True)
 
 
 def test_unknown_rosdep_key_is_never_looked_up_on_pypi(tmp_path: Path) -> None:
@@ -262,6 +264,19 @@ def test_pypi_deps_are_pinned_together_against_system_constraints(
     assert compiles == ["rich\nhttpx>=0.27\n"]
     assert (rich.resolved_version, httpx.resolved_version) == ("15.0.0", "0.28.1")
     assert "pygments==2.18.0" in constraints.read_text(encoding="utf-8").splitlines()
+
+
+def test_pulled_in_direct_references_keep_their_url(tmp_path: Path) -> None:
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        write_output(cmd, "foo==1.0\nbar @ git+https://example.com/bar\n")
+        return completed(cmd, "")
+
+    _, bar = manager_for(tmp_path, system(), runner).resolve_all(
+        [Dep("foo", "", Source.PIP)]
+    )
+
+    assert dep_requirement(bar.dep) == "bar @ git+https://example.com/bar"
+    assert bar.transitive
 
 
 def test_pypi_failure_is_attributed_to_the_failing_dep(tmp_path: Path) -> None:
@@ -417,3 +432,20 @@ def test_upstream_version_strips_epoch_and_debian_revision() -> None:
     assert upstream_version("6.0.1") == "6.0.1"
     assert upstream_version("1.8.0~rc1-1") == "1.8.0rc1"
     assert upstream_version("2.0~git20200101-1") == ""
+
+
+def test_apt_dep_does_not_hide_the_python_package_of_the_same_name(
+    tmp_path: Path,
+) -> None:
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        if cmd[:3] == ["rosdep", "resolve", "protobuf"]:
+            return completed(cmd, "#apt\nlibprotobuf-dev\n")
+        write_output(cmd, "onnx==1.17.0\nprotobuf==5.29.0\n")
+        return completed(cmd, "")
+
+    *_, protobuf = manager_for(tmp_path, system(), runner).resolve_all(
+        [Dep("protobuf", source_hint=Source.ROSDEP), Dep("onnx", "", Source.PIP)]
+    )
+
+    assert (protobuf.dep.name, protobuf.resolved_version) == ("protobuf", "5.29.0")
+    assert protobuf.chosen_source == Source.PIP and protobuf.transitive

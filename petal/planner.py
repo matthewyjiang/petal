@@ -124,7 +124,13 @@ def _shadow_warnings(resolved: list[ResolvedDep]) -> list[str]:
 
     warnings: list[str] = []
     for name, items in by_name.items():
-        pip_items = [item for item in items if item.chosen_source == Source.PIP]
+        # Pulled-in pins are not requests: an apt key like `protobuf`
+        # (libprotobuf-dev) does not stand in for the Python package.
+        pip_items = [
+            item
+            for item in items
+            if item.chosen_source == Source.PIP and not item.transitive
+        ]
         system_items = [
             item for item in items if item.chosen_source in {Source.APT, Source.DISTRO}
         ]

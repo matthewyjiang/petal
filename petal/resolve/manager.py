@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from packaging.requirements import Requirement
+
 from petal.identity import pip_name
 from petal.models import Dep, ResolvedDep, Source
 from petal.planner import PlannerConflict, check_version_conflicts
@@ -101,6 +103,7 @@ class ResolutionManager:
         outcomes = [
             self._select_python(item.dep) if item.chosen_source == Source.PIP else item
             for item in resolved
+            if not item.transitive  # re-derived by _pin_pypi
         ]
         failures = [item for item in outcomes if isinstance(item, Unresolved)]
         if failures:
@@ -152,7 +155,14 @@ class ResolutionManager:
         )
 
     def _pin_pypi(self, resolved: list[ResolvedDep]) -> list[ResolvedDep]:
-        """Resolve all PyPI deps together and record each top-level version."""
+        """Resolve all PyPI deps together and pin the whole closure.
+
+        Declared deps get their versions; packages they pull in are appended as
+        `transitive` PIP pins, including ones this system provides: the
+        installer skips those here, and a machine without them installs the
+        version this system had. Installing is then just these pins with
+        `--no-deps`.
+        """
         items = [item for item in resolved if item.chosen_source == Source.PIP]
         if not items:
             return resolved
@@ -173,12 +183,25 @@ class ResolutionManager:
                 f"pip dependencies conflict with each other:\n{joint}"
             ) from joint
         versions = {pin.name: pin.version for pin in pins}
-        return [
+        # Only Python deps: an apt/rosdep key like `protobuf` (libprotobuf-dev)
+        # must not hide the Python package of the same name.
+        declared = {
+            pip_name(item.dep.name)
+            for item in resolved
+            if item.chosen_source in (Source.PIP, Source.DISTRO)
+        }
+        pinned = [
             replace(item, resolved_version=versions.get(pip_name(item.dep.name), ""))
             if item.chosen_source == Source.PIP
             else item
             for item in resolved
         ]
+        transitive = [
+            ResolvedDep(_pinned_dep(pin), Source.PIP, pin.version, transitive=True)
+            for pin in pins
+            if pin.name not in declared
+        ]
+        return pinned + transitive
 
     def _compile(
         self, requirements: list[str], preferences: dict[str, str]
@@ -186,6 +209,13 @@ class ResolutionManager:
         return compile_requirements(
             requirements, self.venv, self.system, self.runner, preferences
         )
+
+
+def _pinned_dep(pin: Pin) -> Dep:
+    """A pulled-in package; direct references (`bar @ git+...`) keep their URL."""
+    if pin.version:
+        return Dep(pin.name)
+    return Dep(pin.name, f" @ {Requirement(pin.requirement).url}")
 
 
 def lock_mismatch(
@@ -202,7 +232,12 @@ def lock_mismatch(
     distro = DistroResolver(system)
     for item in locked:
         dep = item.dep
-        if item.chosen_source == Source.PIP and system.protects(dep.name):
+        # Pulled-in pins stand in for whatever the system provides.
+        if (
+            item.chosen_source == Source.PIP
+            and not item.transitive
+            and system.protects(dep.name)
+        ):
             return (
                 f"{dep.name} is locked to PyPI, but the system now provides "
                 f"{system.version(dep.name)}"

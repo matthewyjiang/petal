@@ -23,7 +23,7 @@ from petal.discover.workspace import discover_workspace
 from petal.host import Host
 from petal.identity import pip_name
 from petal.installer import InstallerError, execute, uninstall, write_lock
-from petal.models import Dep, Lock, LockStamp, Source
+from petal.models import Dep, Lock, LockStamp, ResolvedDep, Source
 from petal.planner import Plan, PlannerConflict, build_plan
 from petal.resolve.manager import (
     ResolutionManager,
@@ -289,23 +289,30 @@ def _cmd_remove(args: argparse.Namespace, host: Host) -> int:
         print(f"{args.name} not present in petal.toml")
         return 0
 
-    if args.dry_run:
-        uninstall(args.name, venv, dry_run=True, runner=host.runner)
-        return 0
-
+    lock_path = workspace / "petal.lock"
+    lock = load_lock_or_none(lock_path)
     original = manifest_path.read_bytes()
     remove_manifest_dep(manifest_path, args.name)
     try:
         # Same ordering as add: validate the post-change workspace first.
         inputs = _load_inputs(host, workspace, manifest_path, distro)
-        lock = load_lock_or_none(workspace / "petal.lock")
         plan = _workspace_plan(host, inputs, distro, venv, lock)
-        uninstall(args.name, venv, dry_run=False, runner=host.runner)
+        # Uninstall what nothing pins anymore: the dep and what only it pulled in.
+        before = _pip_names(lock.resolved) if lock else {pip_name(args.name)}
+        stale = sorted(before - _pip_names(plan.items()))
+        uninstall(stale, venv, dry_run=args.dry_run, runner=host.runner)
     except BaseException:
         manifest_path.write_bytes(original)
         raise
-    write_lock(workspace / "petal.lock", inputs.stamp, plan.items())
+    if args.dry_run:
+        manifest_path.write_bytes(original)
+        return 0
+    write_lock(lock_path, inputs.stamp, plan.items())
     return 0
+
+
+def _pip_names(items: list[ResolvedDep]) -> set[str]:
+    return {pip_name(i.dep.name) for i in items if i.chosen_source == Source.PIP}
 
 
 def _cmd_status(args: argparse.Namespace, host: Host) -> int:
