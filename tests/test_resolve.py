@@ -11,7 +11,6 @@ from petal.resolve.manager import ResolutionManager
 from petal.resolve.pip import PipResolver, parse_pip_version
 from petal.resolve.rosdep import RosdepResolver, parse_rosdep_resolve
 
-
 FIXTURES = Path(__file__).parent / "fixtures" / "cmd_output"
 
 

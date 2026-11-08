@@ -5,6 +5,7 @@ import configparser
 from pathlib import Path
 
 from packaging.requirements import InvalidRequirement, Requirement
+
 from petal.identity import pip_name
 from petal.models import Dep, Source
 

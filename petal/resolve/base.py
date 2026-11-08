@@ -36,8 +36,7 @@ def default_runner(
             cmd,
             check=False,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             **kwargs,
         )
     except FileNotFoundError:
@@ -54,8 +53,7 @@ def default_stream_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
                 cmd,
                 check=False,
                 text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
             )
 
         done = threading.Event()
@@ -74,8 +72,7 @@ def default_stream_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
                 cmd,
                 check=False,
                 text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
             )
         finally:
             done.set()

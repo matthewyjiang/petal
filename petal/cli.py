@@ -17,7 +17,7 @@ from petal.config import (
     add_manifest_dep,
     dependency_hash,
     find_workspace_root,
-    load_lock,
+    load_lock_or_none,
     load_manifest,
     manifest_hash,
     remove_manifest_dep,
@@ -89,15 +89,6 @@ def _resolve_deps(manager: ResolutionManager, deps: list[Dep]) -> list[ResolvedD
     return [item for item in results if item is not None]
 
 
-def _load_lock_or_none(lock_path: Path):
-    if not lock_path.exists():
-        return None
-    try:
-        return load_lock(lock_path)
-    except Exception:
-        return None
-
-
 def _cmd_sync(args: argparse.Namespace) -> int:
     preflight.assert_ok(preflight.check())
     workspace = find_workspace_root(
@@ -115,7 +106,7 @@ def _cmd_sync(args: argparse.Namespace) -> int:
     discovered = discover_workspace(workspace)
     deps = [*(manifest.deps if manifest else []), *discovered.deps]
     lock_path = workspace / "petal.lock"
-    lock = _load_lock_or_none(lock_path)
+    lock = load_lock_or_none(lock_path)
     if (
         not args.dry_run
         and lock

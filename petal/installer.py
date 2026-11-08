@@ -5,7 +5,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from petal.config import dependency_hash, load_lock, manifest_hash
+from petal.config import (
+    dependency_hash,
+    load_lock,
+    load_lock_or_none,
+    manifest_hash,
+)
 from petal.identity import lock_key, pip_name
 from petal.models import ResolvedDep, Source
 from petal.planner import Plan
@@ -157,11 +162,8 @@ def _write_lock_if_changed(
 def _lock_matches(
     lock_path: Path, manifest_path: Path, resolved: list[ResolvedDep]
 ) -> bool:
-    if not lock_path.exists():
-        return False
-    try:
-        lock = load_lock(lock_path)
-    except Exception:
+    lock = load_lock_or_none(lock_path)
+    if lock is None:
         return False
     if lock.manifest_hash != manifest_hash(manifest_path):
         return False

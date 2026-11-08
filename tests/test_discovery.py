@@ -7,7 +7,6 @@ from petal.discover.setup_cfg import parse_setup_py
 from petal.discover.workspace import discover_workspace
 from petal.models import Source
 
-
 FIXTURES = Path(__file__).parent / "fixtures"
 
 

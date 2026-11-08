@@ -5,7 +5,6 @@ from pathlib import Path
 
 from petal.models import Dep, Source
 
-
 DEPEND_TAGS = {
     "depend",
     "exec_depend",
