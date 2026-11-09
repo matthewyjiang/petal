@@ -124,6 +124,23 @@ def test_run_preserves_signal_delivery(session_workspace: Path) -> None:
     assert result.returncode == -signal.SIGTERM
 
 
+def test_run_preserves_broken_pipe_signal_behavior(session_workspace: Path) -> None:
+    with subprocess.Popen(
+        [sys.executable, "-m", "petal.cli", "run", "yes"],
+        cwd=session_workspace,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ) as child:
+        assert child.stdout is not None and child.stderr is not None
+        assert child.stdout.readline() == "y\n"
+        child.stdout.close()
+        error = child.stderr.read()
+        status = child.wait()
+    assert status == -signal.SIGPIPE, error
+    assert error == ""
+
+
 def test_run_does_not_read_bash_env(
     session_workspace: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

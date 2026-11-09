@@ -47,7 +47,16 @@ def run_command(workspace: Path, argv: list[str]) -> int:
     bootstrap = (
         restore + 'PETAL_SHELL=bash . "$1" || exit $?\n' + 'shift\nexec -- "$@"\n'
     )
+    # execve preserves ignored dispositions, including Python's SIGPIPE default.
+    # Match subprocess's restore_signals behavior before handing off to Bash.
+    ignored_signals: list[int] = []
+    for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ"):
+        sig = getattr(signal, name, None)
+        if sig is not None and signal.getsignal(sig) == signal.SIG_IGN:
+            ignored_signals.append(sig)
     try:
+        for sig in ignored_signals:
+            signal.signal(sig, signal.SIG_DFL)
         os.execve(
             bash,
             [
@@ -64,6 +73,10 @@ def run_command(workspace: Path, argv: list[str]) -> int:
         )
     except OSError as exc:
         raise PetalEnvError(f"Could not start command: {exc}") from exc
+    finally:
+        # Only reached if replacement failed; keep Python's original behavior.
+        for sig in ignored_signals:
+            signal.signal(sig, signal.SIG_IGN)
 
 
 def _startup_tail(script: Path, shell: str) -> str:
