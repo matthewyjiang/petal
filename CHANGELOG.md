@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/matthewyjiang/petal/compare/v0.2.5...v0.3.0) (2026-11-09)
+
+
+### Features
+
+* add run and shell commands for workspace environments ([#39](https://github.com/matthewyjiang/petal/issues/39)) ([5c4c298](https://github.com/matthewyjiang/petal/commit/5c4c298bac13edba82b6a3a5dff8e5a80cf179e5))
+* keep pip from shadowing ROS/system Python packages ([#34](https://github.com/matthewyjiang/petal/issues/34)) ([52b420b](https://github.com/matthewyjiang/petal/commit/52b420b805cdbad3e0d2269573d96b6717f4d089))
+* pin the whole PyPI closure in petal.lock so --frozen installs exactly ([#37](https://github.com/matthewyjiang/petal/issues/37)) ([5d5d4f8](https://github.com/matthewyjiang/petal/commit/5d5d4f8c1c5cbd900944c84eec706d0a3b9e7561))
+
+
+### Bug Fixes
+
+* find the workspace from inside packages and check apt version specs ([#35](https://github.com/matthewyjiang/petal/issues/35)) ([087407e](https://github.com/matthewyjiang/petal/commit/087407e26d350ba346aa77b79d5d7c7a04a2c740))
+* never resolve rosdep keys or workspace packages from PyPI ([#32](https://github.com/matthewyjiang/petal/issues/32)) ([78bc8ed](https://github.com/matthewyjiang/petal/commit/78bc8ed63ccaec8429b5352e299678af740854be))
+
 ## [0.2.5](https://github.com/matthewyjiang/petal/compare/v0.2.4...v0.2.5) (2026-06-22)
 
 
