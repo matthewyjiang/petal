@@ -11,5 +11,13 @@ uv tool install petal-ros
 
 petal init
 petal sync
-source <(petal activate)
+petal shell
+```
+
+`petal shell` opens bash or zsh with ROS and the workspace venv ready; type `exit` to leave.
+For a single command, skip activation entirely:
+
+```bash
+petal run ros2 launch my_package launch.py
+petal run colcon build
 ```

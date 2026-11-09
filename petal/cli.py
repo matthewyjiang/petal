@@ -45,7 +45,7 @@ def _cmd_init(args: argparse.Namespace, host: Host) -> int:
     venv = host.ensure_venv(workspace, distro)
     print(f"initialized {workspace}")
     print(f"venv: {venv}")
-    print(f"activate: {workspace / '.petal' / 'activate'}")
+    print("next: petal sync, then petal shell (or petal run <command>)")
     return 0
 
 
@@ -65,6 +65,27 @@ def _cmd_activate(args: argparse.Namespace, host: Host) -> int:
     shell = f"PETAL_SHELL={args.shell} " if args.shell else ""
     print(f"{shell}. {shlex.quote(str(script))}")
     return 0
+
+
+def _cmd_run(args: argparse.Namespace, host: Host) -> int:
+    argv = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
+    if not argv:
+        print(
+            "petal run: a command is required; use `petal run <command> [args...]`",
+            file=sys.stderr,
+        )
+        return 2
+    workspace = find_workspace_root(
+        Path(args.workspace) if args.workspace else Path.cwd()
+    )
+    return host.run_command(workspace, argv)
+
+
+def _cmd_shell(args: argparse.Namespace, host: Host) -> int:
+    workspace = find_workspace_root(
+        Path(args.workspace) if args.workspace else Path.cwd()
+    )
+    return host.open_shell(workspace, args.shell)
 
 
 def _cmd_clean(args: argparse.Namespace, host: Host) -> int:
@@ -396,6 +417,36 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--workspace")
     init.set_defaults(func=_cmd_init)
 
+    run = sub.add_parser(
+        "run",
+        help="run a command with ROS + the workspace venv",
+        description="Run a command in the existing workspace environment, without activating your shell.",
+        epilog="Petal options go before the command. Example: petal run ros2 launch my_package launch.py",
+    )
+    run.add_argument(
+        "--workspace", help="workspace path (default: find from current directory)"
+    )
+    run.add_argument(
+        "argv",
+        nargs=argparse.REMAINDER,
+        metavar="command",
+        help="executable and arguments, passed unchanged (optional leading --)",
+    )
+    run.set_defaults(func=_cmd_run)
+
+    shell = sub.add_parser(
+        "shell",
+        help="open an interactive shell with ROS + the workspace venv",
+        description="Open bash or zsh with the existing workspace environment ready. Type exit to leave.",
+    )
+    shell.add_argument(
+        "--workspace", help="workspace path (default: find from current directory)"
+    )
+    shell.add_argument(
+        "--shell", help="bash or zsh executable (default: $SHELL, or bash)"
+    )
+    shell.set_defaults(func=_cmd_shell)
+
     activate = sub.add_parser(
         "activate",
         help="print a line that activates ROS + the petal venv (source <(petal activate))",
@@ -405,7 +456,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--shell",
         choices=["bash", "zsh", "sh"],
         default=None,
-        help="ROS 2-supported shell dialect (default: auto-detect from $SHELL)",
+        help="ROS 2-supported shell dialect (default: detect the sourcing shell)",
     )
     activate.set_defaults(func=_cmd_activate)
 

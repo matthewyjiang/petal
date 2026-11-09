@@ -92,15 +92,34 @@ petal status
 
 `petal status` exits with code `2` when the workspace is out of sync.
 
-## Activate
+## Work in the environment
 
-For bash or zsh:
+Open an interactive shell with ROS and the workspace venv ready:
 
 ```bash
-source <(petal activate)
+petal shell
+# Work as usual, then type exit to return to your previous shell.
 ```
 
-For POSIX shells:
+Petal uses bash or zsh from `$SHELL` (bash when unset). Override with `petal shell --shell bash` or `--shell zsh`. Your normal shell configuration loads before Petal activates the environment; no dotfiles are edited.
+
+For one command, no activation is needed:
+
+```bash
+petal run python my_node.py
+petal run ros2 launch my_package launch.py
+petal run colcon build
+```
+
+Both commands work from workspace subdirectories without changing your current directory. They use the existing environment and never install or sync dependencies automatically.
+
+To activate in your **current** shell instead, the existing commands still work:
+
+```bash
+source <(petal activate)  # bash/zsh, including from subdirectories
+```
+
+Or, from the workspace root (also works in POSIX sh):
 
 ```sh
 . .petal/activate

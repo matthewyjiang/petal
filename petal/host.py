@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from petal import env, preflight
+from petal import env, preflight, session
 from petal.resolve.base import (
     Runner,
     StreamRunner,
@@ -32,3 +32,6 @@ class Host:
     # Creates or validates the workspace venv; returns its path.
     ensure_venv: Callable[[Path, str], Path] = env.ensure_venv
     inspect_system: Callable[[str], SystemPython] = inspect_system_python
+    # Foreground sessions: inherit terminal I/O and never mutate the parent env.
+    run_command: Callable[[Path, list[str]], int] = session.run_command
+    open_shell: Callable[[Path, str | None], int] = session.open_shell
