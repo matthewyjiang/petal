@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# ROS setup scripts read optional unset variables; they are not nounset-safe.
+set -eo pipefail
 
 if [[ "${PETAL_REAL_ROS_SMOKE:-}" != "1" ]]; then
   echo "Skipping real ROS smoke; set PETAL_REAL_ROS_SMOKE=1 to run." >&2
@@ -54,5 +55,70 @@ import rclpy
 assert os.environ.get("VIRTUAL_ENV", "").endswith("/.petal/venv")
 PY
 ' _ "$workspace"
+
+# Exercise command/session startup against compiled ROS modules and real RMW
+# initialization, not just a fake setup script or an import-only check.
+cat > .petal/ros_probe.py <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+import rclpy
+from std_msgs.msg import String
+
+workspace = Path(os.environ["PETAL_SMOKE_WORKSPACE"])
+assert Path(sys.prefix) == workspace / ".petal/venv", sys.prefix
+assert Path(os.environ["VIRTUAL_ENV"]) == workspace / ".petal/venv"
+assert Path.cwd() == Path(os.environ["PETAL_SMOKE_CWD"]), Path.cwd()
+
+rclpy.init()
+try:
+    node = rclpy.create_node("petal_environment_smoke")
+    try:
+        # One local probe message; a depth-one queue is sufficient for it.
+        publisher = node.create_publisher(String, "petal_environment_smoke", 1)
+        publisher.publish(String(data="petal ROS environment ready"))
+    finally:
+        node.destroy_node()
+finally:
+    rclpy.shutdown()
+
+print(json.dumps({
+    "result": "ROS node and publisher ready",
+    "ros_distro": os.environ["ROS_DISTRO"],
+    "python": sys.version.split()[0],
+    "executable": sys.executable,
+    "rclpy": rclpy.__file__,
+    "cwd": str(Path.cwd()),
+}))
+PY
+export PETAL_SMOKE_WORKSPACE="$workspace"
+export PETAL_SMOKE_CWD="$workspace"
+(
+  # Do not let the parent's sourced ROS environment mask broken activation.
+  PATH="$(dirname "$(command -v petal)"):/usr/local/bin:/usr/bin:/bin"
+  export PATH
+  unset AMENT_PREFIX_PATH CMAKE_PREFIX_PATH COLCON_PREFIX_PATH LD_LIBRARY_PATH
+  unset PYTHONPATH ROS_DISTRO ROS_VERSION ROS_PYTHON_VERSION
+  petal run --workspace "$workspace" python "$workspace/.petal/ros_probe.py"
+  petal run --workspace "$workspace" ros2 pkg prefix rclpy
+
+  # Workspace lookup must work below the root, without changing the caller's cwd.
+  (
+    cd src/smoke_pkg
+    export PETAL_SMOKE_CWD="$PWD"
+    petal run python "$workspace/.petal/ros_probe.py"
+  )
+
+  for shell in bash zsh; do
+    if command -v "$shell" >/dev/null; then
+      printf 'python .petal/ros_probe.py\nexit $?\n' |
+        petal shell --workspace "$workspace" --shell "$shell"
+    else
+      echo "Skipping interactive $shell smoke: shell not installed" >&2
+    fi
+  done
+)
 
 echo "real ROS smoke passed for ROS_DISTRO=${ROS_DISTRO}"

@@ -29,7 +29,7 @@ Unit tests use fake subprocess runners and do not require network, real ROS, apt
 
 ## Real ROS smoke test
 
-A real ROS integration smoke test is available but intentionally excluded from the default test suite. It validates that Petal can detect ROS, create a `.petal/venv` with `--system-site-packages`, run `petal init`, `petal sync`, `petal status`, exercise `colcon deps`, and emit an activation snippet that exposes ROS Python modules.
+A real ROS integration smoke test is available but intentionally excluded from the default test suite. It validates ROS detection, `.petal/venv` creation with `--system-site-packages`, `petal init`, `petal sync`, `petal status`, and `colcon deps`. It also checks current-shell activation, `petal run` (including workspace discovery from subdirectories), and `petal shell` for each installed bash/zsh. The run/shell checks clear inherited ROS paths first so a previously sourced environment cannot mask activation failures. The run/shell probes use the ROS-compatible venv interpreter to create a real `rclpy` node and publish a `std_msgs/String` message; they do not just check imports.
 
 Run it manually in GitHub Actions with the **Real ROS smoke** workflow, or locally from a ROS machine/container that has `rosdep`, `apt-get`, `uv`, and `colcon` installed:
 

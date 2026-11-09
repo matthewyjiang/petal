@@ -60,10 +60,12 @@ petal init
 petal add numpy
 petal sync
 petal status
-source <(petal activate)  # bash/zsh
+petal shell             # bash/zsh; type exit to leave
 ```
 
-For POSIX shells without process substitution, use the generated workspace script:
+For a single command, use `petal run python my_node.py` or `petal run ros2 launch ...`; no activation is needed. Both commands use the existing environment and never sync automatically.
+
+To activate the current shell instead, use `source <(petal activate)` in bash/zsh. For POSIX shells, source the generated workspace script from the workspace root:
 
 ```sh
 . .petal/activate
@@ -81,6 +83,9 @@ petal sync --no         # show plan, install nothing
 petal sync --dry-run    # show commands, install nothing
 petal sync --frozen     # install exactly petal.lock; fail if stale
 petal status            # report drift; exits 2 on drift/missing/change
+petal shell             # open bash/zsh with ROS + venv; exit to leave
+petal shell --shell zsh # override $SHELL (default: bash when unset)
+petal run <cmd> [args]  # execute with ROS + venv; Petal flags go before cmd
 petal activate          # print a line that sources .petal/activate (ROS + venv)
                          # bash/zsh: source <(petal activate)
                          # POSIX sh: . .petal/activate
@@ -171,4 +176,4 @@ When helping with Petal:
 1. Ask for the ROS distro, workspace root, and dependency name/spec if missing.
 2. Prefer commands that do not mutate state first (`status`, `sync --dry-run`) unless the user explicitly asks to install.
 3. Explain whether a dependency should resolve through ROS/system, rosdep, apt, or PyPI.
-4. Remind users to activate before running ROS Python code that needs Petal-managed packages. Prefer `source <(petal activate)` for bash/zsh and `. .petal/activate` for POSIX shells without process substitution.
+4. Prefer `petal run <command> [args...]` for individual commands or `petal shell` for interactive work with ROS and Petal-managed packages. These require an existing environment and never sync automatically. Keep `source <(petal activate)` (bash/zsh) and `. .petal/activate` (from the workspace root) as current-shell alternatives.

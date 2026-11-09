@@ -63,7 +63,42 @@ petal status
 
 Returns exit code `2` when the workspace is out of sync.
 
+## `petal run <command> [args...]`
+
+Run a command with ROS and the workspace venv loaded, without activating your current shell. Requires bash for the environment bootstrap; the command itself can be any executable.
+
+```bash
+petal run python my_node.py
+petal run ros2 launch my_package launch.py
+petal run colcon build
+petal run --workspace /path/to/ws python my_node.py
+```
+
+Petal options go before the command. Everything after the executable is passed unchanged to it, including flags such as `--workspace`. An optional `--` separates Petal options from the command.
+
+The command inherits terminal input/output and retains its exit status and signal behavior. Shell expressions require an explicit shell:
+
+```bash
+petal run bash -c 'python first.py && python second.py'
+```
+
+## `petal shell`
+
+Open an interactive, non-login bash or zsh session with ROS and the workspace venv loaded **after** your normal shell configuration. Type `exit` to return to the parent shell with its environment unchanged.
+
+```bash
+petal shell
+petal shell --shell zsh
+petal shell --workspace /path/to/ws --shell /bin/bash
+```
+
+Defaults to `$SHELL`, or `/bin/bash` when unset. Other interactive shells are not supported; select bash or zsh explicitly. Petal uses temporary startup files, honors zsh's `ZDOTDIR` and `.zshenv`, and never edits your dotfiles. Zsh startup files must remain enabled (`setopt RCS`).
+
+Both `run` and `shell` find the workspace from the current directory or its parents and do not change directories themselves. They require an existing workspace environment and never sync or install dependencies automatically.
+
 ## `petal activate`
+
+For advanced use when you want to modify your current shell instead of starting a child session.
 
 Print a line that sources `.petal/activate`, which sets up ROS and the petal venv. Both forms below do the same thing. Neither changes your current directory. Use `--shell bash|zsh|sh` to pick which ROS setup script is sourced when auto-detection guesses wrong.
 
